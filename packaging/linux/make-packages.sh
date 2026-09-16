@@ -50,24 +50,11 @@ SIZE_KB=$(du -sk "$ROOT" | cut -f1)
 
 # ---------- Debian ----------
 if command -v dpkg-deb >/dev/null 2>&1; then
-    # Let dpkg work out which packages the binary needs (Qt included) instead of
-    # guessing names: this is what dh_shlibdeps does for regular packages.
-    DEPENDS=""
-    if command -v dpkg-shlibdeps >/dev/null 2>&1; then
-        mkdir -p "$WORK/dpkg/debian"
-        printf 'Source: qutetavern\nPackage: qutetavern\nArchitecture: amd64\n' \
-            > "$WORK/dpkg/debian/control"
-        ( cd "$WORK/dpkg" && dpkg-shlibdeps -O -e "$ROOT/usr/bin/qutetavern" ) \
-            > "$WORK/shlibs.txt" 2> "$WORK/shlibs.err" || true
-        DEPENDS="$(sed -n 's/^shlibs:Depends=//p' "$WORK/shlibs.txt")"
-        if [ -s "$WORK/shlibs.err" ]; then
-            sed 's/^/  shlibdeps: /' "$WORK/shlibs.err" >&2
-        fi
-    fi
-    if [ -z "$DEPENDS" ]; then
-        echo "warning: dpkg-shlibdeps produced nothing, falling back to a static list" >&2
-        DEPENDS="libc6 (>= 2.35), libstdc++6, libqt6core6, libqt6gui6, libqt6widgets6, libqt6network6, libqt6webenginewidgets6"
-    fi
+    # The dependencies are explicit and CI-verified (the package is installed
+    # and started on Ubuntu 22.04 before it is published). dpkg-shlibdeps is
+    # deliberately not used: the build links the official Qt 6.2.4 binaries,
+    # whose libraries belong to no Debian package.
+    DEPENDS="libc6 (>= 2.35), libgcc-s1, libstdc++6, libgl1, libx11-6, libx11-xcb1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libnss3, libnspr4, libasound2, libdbus-1-3, libgbm1, libqt6core6 (>= 6.2), libqt6gui6 (>= 6.2), libqt6widgets6 (>= 6.2), libqt6network6 (>= 6.2), libqt6opengl6 (>= 6.2), libqt6printsupport6 (>= 6.2), libqt6webchannel6 (>= 6.2), libqt6positioning6 (>= 6.2), libqt6webenginecore6 (>= 6.2), libqt6webenginewidgets6 (>= 6.2), libqt6webenginecore6-bin (>= 6.2), qt6-qpa-plugins"
     # WebEngine needs its runtime data (helper process, resources) and Qt its
     # platform plugins; neither is covered by the shared library dependencies
     DEPENDS="$DEPENDS, qt6-qpa-plugins, libqt6webenginecore6-bin"
@@ -98,7 +85,9 @@ fi
 if command -v rpmbuild >/dev/null 2>&1; then
     RPMTOP="$WORK/rpm"
     mkdir -p "$RPMTOP"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS}
-    tar -C "$ROOT" -czf "$RPMTOP/SOURCES/payload.tar.gz" .
+    # DEBIAN/control must never leak into the RPM payload (the section order
+    # makes that possible), so it is excluded explicitly
+    tar -C "$ROOT" --exclude="DEBIAN" -czf "$RPMTOP/SOURCES/payload.tar.gz" .
 
     # No manual Requires: rpm's dependency generator records the SONAMEs of
     # every library the binary links (libQt6Widgets.so.6, ...). Any RPM
