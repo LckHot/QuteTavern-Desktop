@@ -460,7 +460,7 @@ jobs:
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "version: $VERSION"
 
-- name: Install Qt (official binaries, 6.2.4)
+      - name: Install Qt (official binaries, 6.2.4)
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION_FLOOR }}
