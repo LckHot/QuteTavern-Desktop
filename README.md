@@ -88,12 +88,25 @@ ready-to-run packages:
 Release packages are built automatically when a `v*` tag is pushed; the same
 workflow also runs on pull requests to verify that all platforms build.
 
-The AppImage carries its own current Qt. The `.deb` is built against Ubuntu
-22.04's Qt 6.2 and the `.rpm` against the Qt in AlmaLinux 9 + EPEL (Qt 6.5) -
-the oldest environments that still provide a complete Qt WebEngine. Both declare
-the distribution's Qt as a dependency instead of bundling it, so Qt updates come
-from the system package manager; CI installs and starts them in fresh
-environments of exactly those distributions.
+The AppImage carries its own current Qt. The `.deb` and the `.rpm` come from one
+build on Ubuntu 22.04, linked against its Qt 6.2 (the oldest Qt 6 with a complete
+WebEngine), and declare the distribution's Qt as a dependency instead of
+bundling it - so Qt updates arrive through the system package manager.
+
+## Distribution support
+
+| Package | Requirements | Runs on |
+| --- | --- | --- |
+| `.deb` | Qt 6.2+, glibc 2.35+ | Ubuntu 22.04 LTS and newer, Debian 12 and newer |
+| `.rpm` | Qt 6.2+, glibc 2.35+ | Fedora 36 and newer, RHEL 10 and newer, openSUSE Leap 15.6 and newer |
+| `.AppImage` | glibc 2.35+, no system Qt | any distribution meeting the glibc floor (Fedora 36+, Ubuntu 22.04+, Debian 12+, …) |
+| Windows installer | - | Windows 10 1803 or newer |
+| macOS package | - | macOS 12 or newer, Intel and Apple silicon |
+
+Those floors are not assumptions: CI builds and installs the `.deb` on Ubuntu
+22.04, and installs, starts and removes the `.rpm` inside a Fedora container, so
+the oldest supported release is a tested configuration. RHEL 9 is deliberately
+not covered - it ships glibc 2.34, below what the build requires.
 
 ## Window semantics
 

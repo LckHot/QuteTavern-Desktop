@@ -439,8 +439,8 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-  linux-deb-package:
-    name: Debian package
+  linux-packages:
+    name: Linux packages (.deb + .rpm)
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
@@ -451,13 +451,14 @@ jobs:
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "version: $VERSION"
 
-      - name: Install the distribution's Qt
+      - name: Install the distribution's Qt and rpmbuild
         run: |
           sudo apt-get update
-          # The package is built against the Qt of the target distribution - the
-          # oldest one still in use - so it can depend on the distribution's Qt
-          # instead of carrying its own copy.
-          PACKAGES="build-essential cmake
+          # A single build serves both packages: it is linked against the Qt of
+          # Ubuntu 22.04 (Qt 6.2, glibc 2.35), the oldest environment that still
+          # provides a complete Qt WebEngine, so the .deb and the .rpm depend on
+          # the distribution's Qt instead of carrying their own copy.
+          PACKAGES="build-essential cmake rpm
             qt6-base-dev qt6-base-dev-tools qt6-declarative-dev qt6-positioning-dev
             qt6-webchannel-dev qt6-webengine-dev qt6-webengine-dev-tools
             libqt6opengl6-dev libqt6webenginecore6-bin qt6-qpa-plugins"
@@ -476,12 +477,12 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
 
-      - name: Build the .deb
+      - name: Build the .deb and the .rpm
         run: |
           bash packaging/linux/make-packages.sh build/qutetavern "${APP_VERSION}" .
-          ls -l "QuteTavern-${APP_VERSION}-amd64.deb"
+          ls -l QuteTavern-${APP_VERSION}-*
 
-      - name: Verify the package
+      - name: Verify the .deb
         run: |
           set -e
           DEB="QuteTavern-${APP_VERSION}-amd64.deb"
@@ -509,57 +510,24 @@ jobs:
           sudo dpkg -r qutetavern
           echo "the .deb installs, starts and uninstalls cleanly"
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: linux-deb
-          path: QuteTavern-*-amd64.deb
-          if-no-files-found: error
-          compression-level: 0
-
-  linux-rpm-package:
-    name: RPM package
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Determine the version
-        run: |
-          VERSION=$(sed -n 's/.*project(qutetavern VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
-          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "version: $VERSION"
-
-      - name: Build the RPM inside an AlmaLinux 9 container
+      - name: Inspect the .rpm
         run: |
           set -e
-          # AlmaLinux 9 (RHEL 9 family) is the oldest environment that still
-          # offers a complete Qt 6 stack including WebEngine (Qt 6.5 via EPEL),
-          # so the package carries the lowest practical requirements - glibc
-          # 2.34 and Qt 6.5 - and installs on RHEL/Alma/Rocky 9 as well as on
-          # every newer RPM distribution.
-          docker run --rm -v "$PWD:/src" -w /src -e VERSION="${APP_VERSION}" almalinux:9 bash -euc '
-            dnf -y install epel-release dnf-plugins-core
-            dnf config-manager --set-enabled crb
-            # built against the Qt of the target distribution, so the package
-            # depends on it (sonames like libQt6Widgets.so.6) instead of
-            # carrying its own copy
-            dnf -y install --setopt=install_weak_deps=False \
-              cmake gcc-c++ qt6-qtbase-devel qt6-qtwebengine-devel \
-              qt6-qtdeclarative-devel rpm-build
-            cmake -B build-rpm -DCMAKE_BUILD_TYPE=Release >/dev/null
-            cmake --build build-rpm -j"$(nproc)"
-            bash packaging/linux/make-packages.sh build-rpm/qutetavern "$VERSION" .
-            rpm -qpi QuteTavern-*.rpm | head -12
-            echo "--- Qt dependencies declared by the package ---"
-            rpm -qpR QuteTavern-*.rpm | sort -u | grep -i qt
-          '
+          RPM="QuteTavern-${APP_VERSION}-x86_64.rpm"
+          rpm -qpi "$RPM"
+          echo "--- requirements declared by the package ---"
+          rpm -qpR "$RPM" | sort -u
+          rpm -qpR "$RPM" | grep -q "libQt6Widgets.so.6" \
+            || { echo "::error::the Qt dependency is not declared"; exit 1; }
+          rpm -qpR "$RPM" | grep -q "libQt6WebEngineCore.so.6" \
+            || { echo "::error::the WebEngine dependency is not declared"; exit 1; }
 
-      - name: Install and start it in a clean AlmaLinux 9 container
+      - name: Install and start the .rpm in a clean Fedora container
         run: |
           set -e
-          # exactly what a user on the RHEL 9 family does: enable EPEL and let
-          # the package pull its Qt dependencies from there
-          docker run --rm -v "$PWD:/src" -w /src almalinux:9 bash -euc '
-            dnf -y install epel-release
+          # what a user on an RPM distribution does: dnf installs the package
+          # and pulls its Qt dependencies from the distribution
+          docker run --rm -v "$PWD:/src" -w /src fedora:latest bash -euc '
             dnf -y install ./QuteTavern-*.rpm
             test -x /usr/bin/qutetavern
             # the WebEngine runtime must be pulled in through the dependencies
@@ -573,20 +541,22 @@ jobs:
             [ "$rc" = 124 ] || {
               echo "the installed application did not stay alive (exit code $rc)"; exit 1; }
             dnf -y remove qutetavern
-            echo "the RPM installs, starts and uninstalls cleanly"
+            echo "the .rpm installs, starts and uninstalls cleanly"
           '
 
       - uses: actions/upload-artifact@v7
         with:
-          name: linux-rpm
-          path: QuteTavern-*-x86_64.rpm
+          name: linux-packages
+          path: |
+            QuteTavern-*-amd64.deb
+            QuteTavern-*-x86_64.rpm
           if-no-files-found: error
           compression-level: 0
 
   release:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux-appimage, linux-deb-package, linux-rpm-package, windows-installer, macos-pkg]
+    needs: [linux-appimage, linux-packages, windows-installer, macos-pkg]
     runs-on: ubuntu-latest
     permissions:
       contents: write
