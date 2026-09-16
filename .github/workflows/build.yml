@@ -541,7 +541,7 @@ jobs:
           rpm -qpR "$RPM" | sort -u
           rpm -qpR "$RPM" | grep -q "libQt6Widgets.so.6" \
             || { echo "::error::the Qt dependency is not declared"; exit 1; }
-          rpm -qpR "$RPM" | grep -q "libQt6WebEngineCore.so.6" \
+          rpm -qpR "$RPM" | grep -q "libQt6WebEngineWidgets.so.6" \
             || { echo "::error::the WebEngine dependency is not declared"; exit 1; }
 
       - name: Install and start the .rpm in a clean Fedora container
