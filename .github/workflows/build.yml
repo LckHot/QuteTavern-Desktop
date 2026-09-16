@@ -528,10 +528,17 @@ jobs:
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "version: $VERSION"
 
-      - name: Build the RPM inside a Fedora container
+      - name: Build the RPM inside an AlmaLinux 9 container
         run: |
           set -e
-          docker run --rm -v "$PWD:/src" -w /src -e VERSION="${APP_VERSION}" fedora:latest bash -euc '
+          # AlmaLinux 9 (RHEL 9 family) is the oldest environment that still
+          # offers a complete Qt 6 stack including WebEngine (Qt 6.5 via EPEL),
+          # so the package carries the lowest practical requirements - glibc
+          # 2.34 and Qt 6.5 - and installs on RHEL/Alma/Rocky 9 as well as on
+          # every newer RPM distribution.
+          docker run --rm -v "$PWD:/src" -w /src -e VERSION="${APP_VERSION}" almalinux:9 bash -euc '
+            dnf -y install epel-release dnf-plugins-core
+            dnf config-manager --set-enabled crb
             # built against the Qt of the target distribution, so the package
             # depends on it (sonames like libQt6Widgets.so.6) instead of
             # carrying its own copy
@@ -546,10 +553,13 @@ jobs:
             rpm -qpR QuteTavern-*.rpm | sort -u | grep -i qt
           '
 
-      - name: Install and start it in a clean Fedora container
+      - name: Install and start it in a clean AlmaLinux 9 container
         run: |
           set -e
-          docker run --rm -v "$PWD:/src" -w /src fedora:latest bash -euc '
+          # exactly what a user on the RHEL 9 family does: enable EPEL and let
+          # the package pull its Qt dependencies from there
+          docker run --rm -v "$PWD:/src" -w /src almalinux:9 bash -euc '
+            dnf -y install epel-release
             dnf -y install ./QuteTavern-*.rpm
             test -x /usr/bin/qutetavern
             # the WebEngine runtime must be pulled in through the dependencies

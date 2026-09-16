@@ -88,9 +88,12 @@ ready-to-run packages:
 Release packages are built automatically when a `v*` tag is pushed; the same
 workflow also runs on pull requests to verify that all platforms build.
 
-The AppImage carries its own Qt. The `.deb` and `.rpm` are built against the
-distribution's Qt and declare it as a dependency, so Qt updates come from the
-system package manager; CI installs and starts them in fresh environments.
+The AppImage carries its own current Qt. The `.deb` is built against Ubuntu
+22.04's Qt 6.2 and the `.rpm` against the Qt in AlmaLinux 9 + EPEL (Qt 6.5) -
+the oldest environments that still provide a complete Qt WebEngine. Both declare
+the distribution's Qt as a dependency instead of bundling it, so Qt updates come
+from the system package manager; CI installs and starts them in fresh
+environments of exactly those distributions.
 
 ## Window semantics
 
