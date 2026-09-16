@@ -6,3 +6,6 @@ icon.iconset/
 icon.icns
 *.AppImage
 *.pkg
+
+# local tooling logs
+aqtinstall.log

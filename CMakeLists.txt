@@ -34,6 +34,13 @@ target_link_libraries(qutetavern PRIVATE
     Qt6::Network
 )
 
+# Keep the tree warning-free; the CI compilers are GCC/Clang (Linux, macOS) and
+# MSVC (Windows). See CODE-REVIEW.md (F8/F9) for the findings this surfaced.
+target_compile_options(qutetavern PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+)
+
 install(TARGETS qutetavern RUNTIME DESTINATION bin)
 
 # Bundle metadata used by the packaging jobs in .github/workflows/build.yml

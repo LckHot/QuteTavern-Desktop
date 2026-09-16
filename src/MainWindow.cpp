@@ -386,7 +386,7 @@ void MainWindow::applyState()
     struct {
         const char *color;
         const char *text;
-    } s;
+    } s = {"#f87171", "Unknown"}; // a future Status value must not read uninitialized memory
     switch (m_backend->status()) {
     case Backend::Status::Stopped: s = {"#9a8fb0", "Stopped"}; break;
     case Backend::Status::Starting: s = {"#facc15", "Starting..."}; break;

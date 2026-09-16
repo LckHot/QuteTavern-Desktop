@@ -168,7 +168,9 @@ private slots:
 private:
     void nextStep();
     void fetchNodeVersion();
-    void fetchMinGitUrl();
+#ifdef Q_OS_WIN
+    void fetchMinGitUrl(); // MinGit is the portable git fallback for Windows only
+#endif
     void downloadToFile(const QUrl &url, const std::function<void(const QString &)> &onSaved);
     void finishOk();
 
@@ -271,6 +273,9 @@ void EnvDialog::fetchNodeVersion()
     });
 }
 
+#ifdef Q_OS_WIN
+// Windows only: elsewhere git either ships with the OS tooling (macOS) or has to
+// come from the distribution - the dialog says so and downloadToFile is not used.
 void EnvDialog::fetchMinGitUrl()
 {
     m_status->setText(QStringLiteral("Fetching the MinGit download URL..."));
@@ -315,6 +320,7 @@ void EnvDialog::fetchMinGitUrl()
         });
     });
 }
+#endif // Q_OS_WIN
 
 void EnvDialog::downloadToFile(const QUrl &url,
                                const std::function<void(const QString &)> &onSaved)
