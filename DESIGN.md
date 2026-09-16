@@ -69,7 +69,7 @@ exists** (unless the user closed it), no hidden state.
 | `Backend.{h,cpp}` | Backend child process state machine (the core, see §4) |
 | `StWindow.{h,cpp}` | WebEngine window; writes its geometry back to Settings on close |
 | `Settings.{h,cpp}` | Launcher configuration (JSON); on Linux it falls back to the legacy configuration path |
-| `Util.{h,cpp}` | Platform abstraction + general utilities (see §5) |
+| `Util.{h,cpp}` | Platform abstraction + general utilities (see §5); single place for command lookup |
 | `Updater.{h,cpp}` | Update check / update execution (pure logic, called from a worker thread) |
 | `Installer.{h,cpp}` | Install a new copy from GitHub (pure logic, called from a worker thread) |
 
@@ -151,6 +151,13 @@ inherited PATH failed** - desktop launches do not run a login shell, so tools
 installed via Homebrew/nvm or into custom directories would otherwise be
 invisible. Because the extra directories are appended and only fetched on
 demand, users whose commands resolve directly are unaffected.
+
+**One resolver for detection and execution**: every child process is started
+with the **absolute path** `Util::findCommand()` returned, never with a bare
+program name. QProcess resolves bare names through the PATH of the *parent*
+process and ignores the environment set with `setProcessEnvironment()`, so a
+bare `node` would fail exactly when the login shell PATH is what makes it
+findable - detection would succeed while starting the backend failed.
 
 ## 6. Environment check and component downloads (EnvCheck)
 

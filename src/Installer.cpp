@@ -46,7 +46,11 @@ std::optional<QString> install(const QString &targetParent,
     QProcess tagProc;
     tagProc.setWorkingDirectory(dir);
     tagProc.setProcessEnvironment(Util::commandEnv());
-    tagProc.start("git", {"tag", "--list", "--sort=-v:refname"});
+    // absolute path: QProcess resolves bare program names through the parent's
+    // PATH only (see Util::findCommand)
+    const QString git = Util::findCommand(QStringLiteral("git"));
+    tagProc.start(git.isEmpty() ? QStringLiteral("git") : git,
+                  {"tag", "--list", "--sort=-v:refname"});
     tagProc.waitForFinished(10'000);
     const QString latest =
         QString::fromUtf8(tagProc.readAllStandardOutput()).section('\n', 0, 0).trimmed();

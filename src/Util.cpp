@@ -404,13 +404,20 @@ std::optional<int> runStreaming(const QString &program,
                                 const std::function<void(const QString &)> &onLine,
                                 QString *errMsg)
 {
-    QString prog = program;
+    // Resolve the program to an absolute path first: QProcess locates bare
+    // program names through the PATH of the *parent* process, so the login
+    // shell PATH and the built-in components that exist only in the child
+    // environment we pass would otherwise never be used.
+    QString prog = findCommand(program);
+    if (prog.isEmpty())
+        prog = program; // let QProcess report the failure
     QStringList realArgs = args;
 #ifdef Q_OS_WIN
-    // npm is a batch script on Windows and has to be started through cmd
-    if (prog == "npm") {
-        prog = "cmd";
-        realArgs = QStringList{"/c", "npm"} + args;
+    // batch scripts have to be started through cmd
+    if (prog.endsWith(QStringLiteral(".cmd"), Qt::CaseInsensitive)
+        || prog.endsWith(QStringLiteral(".bat"), Qt::CaseInsensitive)) {
+        realArgs = QStringList{QStringLiteral("/c"), prog} + args;
+        prog = QStringLiteral("cmd");
     }
 #endif
 

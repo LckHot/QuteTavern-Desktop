@@ -195,12 +195,22 @@ void Backend::startNpmInstall()
     QProcessEnvironment env = Util::commandEnv();
     env.insert("NODE_ENV", "production");
     m_npm->setProcessEnvironment(env);
+    // npm is resolved to an absolute path for the same reason as node
+    const QString npm = Util::findCommand(QStringLiteral("npm"));
+    if (npm.isEmpty()) {
+        m_npm->deleteLater();
+        m_npm = nullptr;
+        setError(QStringLiteral("npm executable not found. Please make sure Node.js (>= 22) "
+                                "is installed and on PATH."),
+                 true);
+        return;
+    }
 #ifdef Q_OS_WIN
     m_npm->setProgram("cmd");
-    m_npm->setArguments({"/c", "npm", "install", "--omit=dev", "--ignore-scripts",
+    m_npm->setArguments({"/c", npm, "install", "--omit=dev", "--ignore-scripts",
                          "--no-audit", "--no-fund", "--loglevel=error"});
 #else
-    m_npm->setProgram("npm");
+    m_npm->setProgram(npm);
     m_npm->setArguments({"install", "--omit=dev", "--ignore-scripts",
                          "--no-audit", "--no-fund", "--loglevel=error"});
 #endif
@@ -292,6 +302,17 @@ void Backend::spawnNode()
     if (m_status != Status::Starting || m_stopping)
         return;
 
+    // Resolve node to an absolute path: QProcess resolves bare names through
+    // the parent's PATH, which does not contain the login shell PATH or the
+    // built-in components we append to the child environment.
+    const QString node = Util::findCommand(QStringLiteral("node"));
+    if (node.isEmpty()) {
+        setError(QStringLiteral("node executable not found. Please make sure Node.js (>= 22) "
+                                "is installed and on PATH."),
+                 false);
+        return;
+    }
+
     const Settings s = Settings::load();
     m_lineBuf.clear();
     m_proc = new QProcess(this);
@@ -300,7 +321,7 @@ void Backend::spawnNode()
     QProcessEnvironment env = Util::commandEnv();
     env.insert("NODE_ENV", "production");
     m_proc->setProcessEnvironment(env);
-    m_proc->setProgram("node");
+    m_proc->setProgram(node);
     QStringList args{"server.js", "--global", "--browserLaunchEnabled=false"};
     args += s.extraBackendArgs;
     m_proc->setArguments(args);
