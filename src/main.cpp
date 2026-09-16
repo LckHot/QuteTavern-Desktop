@@ -20,7 +20,7 @@ int main(int argc, char *argv[])
     // ~/.local/share/QuteTavern). The SillyTavern data directory is a separate,
     // fixed location and unaffected by this.
     QApplication::setApplicationName(QStringLiteral("QuteTavern"));
-    QApplication::setApplicationVersion(QStringLiteral("1.0.1"));
+    QApplication::setApplicationVersion(QStringLiteral("1.0.2"));
     QApplication::setDesktopFileName(QStringLiteral("qutetavern.desktop"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/icon.png")));
 
