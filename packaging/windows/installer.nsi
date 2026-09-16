@@ -33,7 +33,9 @@ OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
 InstallDirRegKey HKCU "Software\${APP_ID}" "InstallDir"
 RequestExecutionLevel user
-SetCompressor /SOLID lzma
+; zlib keeps the installer build fast; most of the payload (Qt DLLs, WebEngine
+; resources) barely compresses further anyway
+SetCompressor /SOLID zlib
 ShowInstDetails show
 
 VIProductVersion "${VERSION}.0"

@@ -79,9 +79,11 @@ ready-to-run packages:
 
 | Platform | Package |
 | --- | --- |
-| Linux | `SillyTavern-Launcher-<version>-x86_64.AppImage` |
-| Windows | `SillyTavern-Launcher-<version>-Setup.exe` (NSIS installer) |
-| macOS | `SillyTavern-Launcher-<version>-universal.pkg` (Intel + Apple silicon) |
+| Linux | `QuteTavern-<version>-x86_64.AppImage` |
+| Debian / Ubuntu | `QuteTavern-<version>-amd64.deb` |
+| Fedora / RHEL / openSUSE | `QuteTavern-<version>-x86_64.rpm` |
+| Windows | `QuteTavern-<version>-Setup.exe` (NSIS installer) |
+| macOS | `QuteTavern-<version>-universal.pkg` (Intel + Apple silicon) |
 
 Release packages are built automatically when a `v*` tag is pushed; the same
 workflow also runs on pull requests to verify that all three platforms build.

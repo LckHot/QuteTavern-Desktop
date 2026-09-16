@@ -186,11 +186,58 @@ jobs:
           fi
           echo "the AppImage started and stayed alive"
 
+      - name: Build the Debian and RPM packages
+        run: |
+          set -e
+          # the same AppDir that was just assembled and verified becomes the
+          # payload of both native packages
+          sudo apt-get install -y --no-install-recommends rpm
+          bash packaging/linux/make-packages.sh AppDir "${APP_VERSION}" .
+          ls -l "QuteTavern-${APP_VERSION}-amd64.deb" "QuteTavern-${APP_VERSION}-x86_64.rpm"
+
+      - name: Verify the Debian package
+        run: |
+          set -e
+          DEB="QuteTavern-${APP_VERSION}-amd64.deb"
+          dpkg-deb -I "$DEB"
+          dpkg-deb -c "$DEB" | grep -q "opt/qutetavern/libexec/QtWebEngineProcess"
+          dpkg-deb -c "$DEB" | grep -q "opt/qutetavern/resources/icudtl.dat"
+          dpkg-deb -c "$DEB" | grep -q "opt/qutetavern/translations/qtwebengine_locales"
+          # install it for real, start it once, remove it again
+          sudo dpkg -i "$DEB"
+          test -x /opt/qutetavern/bin/qutetavern
+          QT_QPA_PLATFORM=offscreen /usr/bin/qutetavern >deb-smoke.log 2>&1 &
+          PID=$!
+          sleep 10
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "::error::the application from the Debian package exited immediately"
+            cat deb-smoke.log
+            exit 1
+          fi
+          kill "$PID" || true
+          sudo dpkg -r qutetavern
+          echo "the Debian package installs, starts and uninstalls cleanly"
+
+      - name: Verify the RPM package
+        run: |
+          set -e
+          RPM="QuteTavern-${APP_VERSION}-x86_64.rpm"
+          rpm -qpi "$RPM"
+          rpm -qpl "$RPM" | grep -q "opt/qutetavern/libexec/QtWebEngineProcess"
+          rpm -qpl "$RPM" | grep -q "opt/qutetavern/resources/icudtl.dat"
+          echo "dependencies declared by the RPM:"
+          rpm -qpR "$RPM"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: linux-appimage
-          path: QuteTavern-*-x86_64.AppImage
+          name: linux-packages
+          path: |
+            QuteTavern-*-x86_64.AppImage
+            QuteTavern-*-amd64.deb
+            QuteTavern-*-x86_64.rpm
           if-no-files-found: error
+          # the packages are compressed already, re-zipping them only costs time
+          compression-level: 0
 
   windows-installer:
     name: Windows installer
@@ -295,6 +342,7 @@ jobs:
           name: windows-installer
           path: QuteTavern-*-Setup.exe
           if-no-files-found: error
+          compression-level: 0
 
   macos-pkg:
     name: macOS package
@@ -434,6 +482,7 @@ jobs:
           name: macos-pkg
           path: QuteTavern-*-universal.pkg
           if-no-files-found: error
+          compression-level: 0
 
   release:
     name: Publish release

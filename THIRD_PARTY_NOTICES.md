@@ -20,7 +20,7 @@ v3.0 (see [LICENSE](LICENSE)).
   LGPL, the libraries can be replaced with a compatible build: replace the
   bundled `.so` files inside the AppImage, drop a matching Qt next to
   `qutetavern.exe` on Windows, or replace the frameworks inside
-  `SillyTavern-Launcher.app` on macOS.
+  `QuteTavern.app` on macOS.
 
 ## Chromium (used through Qt WebEngine)
 
