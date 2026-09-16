@@ -60,10 +60,7 @@ std::optional<QString> install(const QString &targetParent,
 
     // 3. Install dependencies (same flags as start.sh)
     onPhase(QStringLiteral("Installing dependencies (npm install)..."));
-    const auto npm = Util::runStreaming(
-        "npm", {"install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund",
-                "--loglevel=error"},
-        dir, 600'000, log);
+    const auto npm = Util::runStreaming("npm", Util::npmInstallArgs(), dir, 600'000, log);
     if (!npm || *npm != 0) {
         if (err)
             *err = QStringLiteral("npm install failed, see the launcher log.");

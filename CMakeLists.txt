@@ -61,7 +61,7 @@ endif()
 # source files as the app so both stay honest about the same code.
 include(CTest)
 if(BUILD_TESTING)
-    find_package(Qt6 REQUIRED COMPONENTS Test)
+    find_package(Qt6 REQUIRED COMPONENTS Gui Test)
     qt_add_executable(qutetavern-tests
         tests/tst_qutetavern.cpp
         src/Util.cpp
@@ -75,6 +75,7 @@ if(BUILD_TESTING)
     target_link_libraries(qutetavern-tests PRIVATE
         Qt6::Core
         Qt6::Network
+        Qt6::Gui # Util.cpp uses QDesktopServices (openPath), a QtGui class
         Qt6::Test
     )
     add_test(NAME qutetavern-tests COMMAND qutetavern-tests)

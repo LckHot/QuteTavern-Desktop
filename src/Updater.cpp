@@ -126,10 +126,7 @@ bool perform(const QString &stRoot,
     }
 
     log(QStringLiteral("Installing dependencies (npm install)..."));
-    const auto npm = Util::runStreaming(
-        "npm", {"install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund",
-                "--loglevel=error"},
-        stRoot, 600'000, log);
+    const auto npm = Util::runStreaming("npm", Util::npmInstallArgs(), stRoot, 600'000, log);
     if (!npm || *npm != 0) {
         if (err)
             *err = QStringLiteral("npm install failed, see the launcher log.");

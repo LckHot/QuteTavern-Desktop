@@ -190,7 +190,7 @@ void Backend::afterProbeContinue()
 
 void Backend::startNpmInstall()
 {
-    log(QStringLiteral("Installing dependencies (npm install --omit=dev --ignore-scripts), "
+    log(QStringLiteral("Installing dependencies (npm install --omit=dev), "
                        "this may take a few minutes..."));
 
     const QString root = stRoot();
@@ -211,13 +211,12 @@ void Backend::startNpmInstall()
         return;
     }
 #ifdef Q_OS_WIN
+    // npm is a batch script on Windows and has to be started through cmd
     m_npm->setProgram("cmd");
-    m_npm->setArguments({"/c", npm, "install", "--omit=dev", "--ignore-scripts",
-                         "--no-audit", "--no-fund", "--loglevel=error"});
+    m_npm->setArguments(QStringList{"/c", npm} + Util::npmInstallArgs());
 #else
     m_npm->setProgram(npm);
-    m_npm->setArguments({"install", "--omit=dev", "--ignore-scripts",
-                         "--no-audit", "--no-fund", "--loglevel=error"});
+    m_npm->setArguments(Util::npmInstallArgs());
 #endif
     connect(m_npm, &QProcess::readyReadStandardOutput, this, &Backend::onNpmReadyRead);
     connect(m_npm, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
@@ -249,10 +248,10 @@ void Backend::onNpmFinished(int code, QProcess::ExitStatus)
     m_npm = nullptr;
     m_npmTimer.stop();
 
-    if (m_stopping || m_status != Status::Starting) {
-        finishStop();
+    // A stop already ran to completion (stop() finishes synchronously when npm
+    // was the only child); recycling npm must not re-announce Stopped
+    if (m_stopping || m_status != Status::Starting)
         return;
-    }
     if (m_npmTimeout) {
         m_npmTimeout = false;
         setError(QStringLiteral("Dependency installation timed out (%1 minutes) and was "
@@ -282,10 +281,8 @@ void Backend::onNpmError(QProcess::ProcessError e)
     m_npmTimer.stop();
     np->deleteLater();
     log(QStringLiteral("Could not start npm: %1").arg(np->errorString()));
-    if (m_stopping || m_status != Status::Starting) {
-        finishStop();
-        return;
-    }
+    if (m_stopping || m_status != Status::Starting)
+        return; // a stop already completed, see onNpmFinished
     setError(QStringLiteral("npm could not be started (not found or not executable). "
                             "Please make sure Node.js/npm are installed and on PATH."),
              true);
@@ -335,6 +332,13 @@ void Backend::spawnNode()
     connect(m_proc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
             this, &Backend::onProcFinished);
     connect(m_proc, &QProcess::errorOccurred, this, &Backend::onProcError);
+    // The PID is only valid once the child really started
+    connect(m_proc, &QProcess::started, this, [this] {
+        auto *p = qobject_cast<QProcess *>(sender());
+        if (p && p == m_proc)
+            log(QStringLiteral("Backend started (node server.js --global, PID %1)")
+                    .arg(QString::number(p->processId())));
+    });
 
     // Tie the backend's life to the launcher: PR_SET_PDEATHSIG makes the kernel
     // SIGTERM the child when this process dies - including a SIGKILL, where no
@@ -348,8 +352,6 @@ void Backend::spawnNode()
     // errorOccurred (see onProcError); checking error() right here is not reliable
     m_proc->start();
     m_nodeAlive = true;
-    log(QStringLiteral("Starting the backend (node server.js --global, PID %1)...")
-            .arg(QString::number(m_proc->processId())));
     m_startTimer.start(kStartTimeoutMs);
 }
 

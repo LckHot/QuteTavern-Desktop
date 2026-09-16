@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Util.h"
 
+#include <QDesktopServices>
 #include <QDir>
 #include <QDateTime>
 #include <QFile>
@@ -14,6 +15,7 @@
 #include <QStandardPaths>
 #include <QTcpSocket>
 #include <QThread>
+#include <QUrl>
 
 #ifdef Q_OS_UNIX
 #include <signal.h>
@@ -233,13 +235,9 @@ QString ansiStrip(const QString &s)
 void openPath(const QString &path)
 {
     QDir().mkpath(path);
-#ifdef Q_OS_WIN
-    QProcess::startDetached("explorer", {QDir::toNativeSeparators(path)});
-#elif defined(Q_OS_MAC)
-    QProcess::startDetached("open", {path});
-#else
-    QProcess::startDetached("xdg-open", {path});
-#endif
+    // QDesktopServices dispatches to the right handler per platform (Explorer,
+    // Finder, xdg-open) instead of a hand-rolled process launch
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
 #if defined(Q_OS_LINUX)
@@ -610,4 +608,16 @@ bool Util::extractArchive(const QString &archive,
         return false;
     }
     return true;
+}
+
+QStringList Util::npmInstallArgs()
+{
+    return {QStringLiteral("install"),
+            QStringLiteral("--no-save"),
+            QStringLiteral("--no-audit"),
+            QStringLiteral("--no-fund"),
+            QStringLiteral("--loglevel=error"),
+            QStringLiteral("--no-progress"),
+            QStringLiteral("--omit=dev"),
+            QStringLiteral("--ignore-scripts")};
 }

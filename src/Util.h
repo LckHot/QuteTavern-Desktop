@@ -92,4 +92,10 @@ bool extractArchive(const QString &archive,
                     int stripComponents,
                     QString *err);
 
+// Arguments of the `npm install` calls made by the launcher, the updater and
+// the installer. Mirrors SillyTavern's start.sh: --no-save is the guard that
+// keeps package.json / package-lock.json untouched (a git checkout must stay
+// clean for the next update), --omit=dev skips development dependencies.
+QStringList npmInstallArgs();
+
 } // namespace Util

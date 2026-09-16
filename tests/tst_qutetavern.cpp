@@ -50,6 +50,8 @@ private slots:
 
     void parseNetstatListeners_ignoresTheStateLanguage();
     void parseNetstatListeners_skipsNonListeningRows();
+
+    void npmInstallArgs_followStartSh();
 };
 
 void TestQuteTavern::ansiStrip_removesColorSequences()
@@ -189,6 +191,17 @@ void TestQuteTavern::parseNetstatListeners_skipsNonListeningRows()
         "  TCP    127.0.0.1:8000         0.0.0.0:0              LISTENING    7777\n"
         "  TCP    0.0.0.0:18000          0.0.0.0:0              LISTENING    9999\n");
     QCOMPARE(Util::parseNetstatListeners(output, 8000), (QList<qint64>{7777}));
+}
+
+void TestQuteTavern::npmInstallArgs_followStartSh()
+{
+    // The policy mirrors SillyTavern's start.sh; --no-save is the guard that
+    // keeps a git checkout clean for the next update
+    const QStringList args = Util::npmInstallArgs();
+    QCOMPARE(args.first(), QStringLiteral("install"));
+    QVERIFY(args.contains(QStringLiteral("--no-save")));
+    QVERIFY(args.contains(QStringLiteral("--omit=dev")));
+    QVERIFY(args.contains(QStringLiteral("--ignore-scripts")));
 }
 
 QTEST_GUILESS_MAIN(TestQuteTavern)

@@ -47,7 +47,9 @@ signals:
     void foreignInstanceFound(int port); // port is busy; waiting for a foreignXxx decision
 
 public slots:
-    // Thread-safe log entry point (called by the install/update threads)
+    // Log entry point for the install/update workers: they reach it through
+    // QMetaObject::invokeMethod(qApp, ...) because log() appends to m_tail and
+    // is only safe on this object's own thread
     void log(const QString &line);
 
 private slots:
