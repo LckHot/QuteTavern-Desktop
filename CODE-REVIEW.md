@@ -211,3 +211,50 @@ packaging jobs.
 Harness + fake SillyTavern + ASan build live in `/opt/data/tmp/qtr/`
 (`harness/harness.cpp`, `setup.sh`, `run.sh`, `run-asan.sh`; Qt from
 `/home/linuxbrew/.linuxbrew`). It is scratch tooling, not part of the repo.
+
+---
+
+## Fix status (branch `fix/code-review-followups`)
+
+Applied on this branch; each commit message references its finding.
+
+- **F1/F2 — done**: `Util::stDataDir()` mirrors env-paths on every platform
+  (Windows `%LOCALAPPDATA%\SillyTavern\Data`, Linux honours `$XDG_DATA_HOME`);
+  README/DESIGN updated; unit tests cover the port reader and the path rules.
+- **F3 — done**: `parseNetstatListeners()` recognises listening rows by their
+  wildcard peer address instead of the localized state column; a German output
+  fixture is part of the unit tests.
+- **F4 — done**: `Updater::latestVersionTag()` / `pickLatestVersionTag()` are
+  shared by the update check and the installer - pre-release tags are skipped
+  in both paths now.
+- **F5 — done (extraction)**: archives extract on a worker thread with an
+  indeterminate progress bar. The login-shell harvest stays as is: it is
+  bounded (~4 s), runs at most once per session and happens before any window
+  is shown, so it cannot freeze an interactive dialog.
+- **F6 — done**: `PR_SET_PDEATHSIG` on Linux (verified by SIGKILLing the test
+  harness - the backend dies with it); README/DESIGN corrected; the node
+  version wording matches SillyTavern's `engines` (>= 20).
+- **F7 — done**: `Util::npmInstallArgs()` (aligned with start.sh; includes
+  `--no-save --no-progress`) is the single source for all three call sites.
+- **F8/F9 — done**: `-Wall -Wextra` / `/W4` are on; both warnings fixed; the
+  tree builds warning-free.
+- **F10 — done**: `qutetavern-tests` (ctest, 16 checks) runs in both Linux CI
+  jobs before packaging.
+- **F11 — done**: `aqtinstall.log` untracked.
+- **F12 — done**: single-instance probe/socket handling (verified headless:
+  a second launch exits in ~30 ms; a stale socket recovers), log comment, PID
+  log timing, duplicate `Stopped` signal, `QDesktopServices::openUrl()` for the
+  data directory, and the installer's .desktop entry now matches the packaged
+  one.
+
+Intentionally not applied:
+
+- The HTTP probe through `QNetworkAccessManager` (F12, last bullet) - the
+  current `QTcpSocket` probe is correct; a rewrite buys convenience, not
+  behaviour.
+- A hard node-version check: the wording now matches upstream instead of
+  enforcing a floor the launcher never enforced.
+
+Still needs real hardware (or the CI packages) to confirm: F1/F3 runtime
+behaviour on Windows, macOS behaviour, and the GUI/WebEngine flows beyond the
+offscreen smoke test.
