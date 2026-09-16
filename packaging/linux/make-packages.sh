@@ -1,49 +1,43 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Build a Debian and an RPM package from an assembled AppDir, so that a single
-# Linux build produces the AppImage plus both native package formats.
+# Build a Debian and an RPM package around a binary that links the
+# distribution's Qt. Qt is deliberately *not* bundled: the packages declare the
+# Qt libraries they need and let the system's package manager provide them.
 #
-#   make-packages.sh <appdir> <version> <output-dir>
+#   make-packages.sh <binary> <version> <output-dir>
 #
-# The payload goes below /opt/qutetavern - the bundled Qt stays next to the
-# binary exactly as in the AppDir - and is exposed through /usr/bin/qutetavern.
+# The binary has to be built against the Qt of the target distribution (the CI
+# builds the .deb on Ubuntu and the .rpm inside a Fedora container).
 set -euo pipefail
 
-APPDIR="$(realpath "${1:?usage: make-packages.sh <appdir> <version> <output-dir>}")"
+BINARY="$(realpath "${1:?usage: make-packages.sh <binary> <version> <output-dir>}")"
 VERSION="${2:?missing version}"
 OUTDIR="$(realpath -m "${3:?missing output directory}")"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MAINTAINER="${MAINTAINER:-QuteTavern contributors <LckHot@users.noreply.github.com>}"
 HOMEPAGE="https://github.com/LckHot/QuteTavern-Desktop"
-PREFIX="/opt/qutetavern"
 DESCRIPTION="Desktop launcher for SillyTavern"
+SUMMARY_LONG="QuteTavern supervises the SillyTavern server as a child process and shows its
+ web interface in an embedded Chromium window (Qt WebEngine). It installs and
+ updates SillyTavern, and starts or stops the backend with one click."
 
-[ -x "$APPDIR/usr/bin/qutetavern" ] || {
-    echo "error: $APPDIR/usr/bin/qutetavern is missing" >&2
-    exit 1
-}
+[ -x "$BINARY" ] || { echo "error: $BINARY is not executable" >&2; exit 1; }
 mkdir -p "$OUTDIR"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 ROOT="$WORK/root"
 
-# ---------- payload ----------
-mkdir -p "$ROOT$PREFIX" "$ROOT/usr/bin" "$ROOT/usr/share"
-cp -a "$APPDIR/usr/." "$ROOT$PREFIX/"
-cp -a "$APPDIR/usr/share/." "$ROOT/usr/share/" # desktop entry, icon, notices
-
-# Without this Qt looks for the build machine's paths; with it, plugins and the
-# WebEngine runtime (libexec, resources, translations) resolve relative to the
-# installation prefix.
-cat > "$ROOT$PREFIX/bin/qt.conf" <<'EOF'
-[Paths]
-Prefix = ..
-EOF
-
-ln -s "$PREFIX/bin/qutetavern" "$ROOT/usr/bin/qutetavern"
-
-mkdir -p "$ROOT/usr/share/doc/qutetavern"
+# ---------- payload (plain FHS layout, no bundled libraries) ----------
+install -Dm755 "$BINARY" "$ROOT/usr/bin/qutetavern"
+install -Dm644 "$REPO_ROOT/packaging/linux/qutetavern.desktop" \
+    "$ROOT/usr/share/applications/qutetavern.desktop"
+install -Dm644 "$REPO_ROOT/resources/icon.png" \
+    "$ROOT/usr/share/icons/hicolor/256x256/apps/qutetavern.png"
+install -Dm644 "$REPO_ROOT/LICENSE" "$ROOT/usr/share/doc/qutetavern/LICENSE"
+install -Dm644 "$REPO_ROOT/THIRD_PARTY_NOTICES.md" \
+    "$ROOT/usr/share/doc/qutetavern/THIRD_PARTY_NOTICES.md"
 cat > "$ROOT/usr/share/doc/qutetavern/copyright" <<EOF
 Upstream: $HOMEPAGE
 License: AGPL-3.0-or-later (see LICENSE next to this file)
@@ -52,12 +46,57 @@ EOF
 
 SIZE_KB=$(du -sk "$ROOT" | cut -f1)
 
+# ---------- Debian ----------
+if command -v dpkg-deb >/dev/null 2>&1; then
+    # Let dpkg work out which packages the binary needs (Qt included) instead of
+    # guessing names: this is what dh_shlibdeps does for regular packages.
+    DEPENDS=""
+    if command -v dpkg-shlibdeps >/dev/null 2>&1; then
+        mkdir -p "$WORK/dpkg/debian"
+        printf 'Source: qutetavern\nPackage: qutetavern\n' > "$WORK/dpkg/debian/control"
+        DEPENDS="$(cd "$WORK/dpkg" && dpkg-shlibdeps -O -e "$ROOT/usr/bin/qutetavern" 2>/dev/null \
+                   | sed -n 's/^shlibs:Depends=//p')" || true
+    fi
+    if [ -z "$DEPENDS" ]; then
+        echo "warning: dpkg-shlibdeps produced nothing, falling back to a static list" >&2
+        DEPENDS="libc6, libstdc++6, libqt6core6, libqt6gui6, libqt6widgets6, libqt6network6, libqt6webenginewidgets6"
+    fi
+    # WebEngine needs its runtime data (helper process, resources) and Qt its
+    # platform plugins; neither is covered by the shared library dependencies
+    DEPENDS="$DEPENDS, qt6-qpa-plugins, libqt6webenginecore6-bin"
+
+    mkdir -p "$ROOT/DEBIAN"
+    cat > "$ROOT/DEBIAN/control" <<EOF
+Package: qutetavern
+Version: $VERSION
+Section: games
+Priority: optional
+Architecture: amd64
+Maintainer: $MAINTAINER
+Installed-Size: $SIZE_KB
+Depends: $DEPENDS
+Homepage: $HOMEPAGE
+Description: $DESCRIPTION
+$SUMMARY_LONG
+EOF
+
+    dpkg-deb --build --root-owner-group "$ROOT" "$OUTDIR/QuteTavern-$VERSION-amd64.deb" >/dev/null
+    echo "built $OUTDIR/QuteTavern-$VERSION-amd64.deb"
+    echo "  Depends: $DEPENDS"
+else
+    echo "note: dpkg-deb is not available, skipping the Debian package"
+fi
+
 # ---------- RPM ----------
 if command -v rpmbuild >/dev/null 2>&1; then
     RPMTOP="$WORK/rpm"
     mkdir -p "$RPMTOP"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS}
     tar -C "$ROOT" -czf "$RPMTOP/SOURCES/payload.tar.gz" .
 
+    # No manual Requires: rpm's dependency generator records the SONAMEs of
+    # every library the binary links (libQt6Widgets.so.6, ...). Any RPM
+    # distribution that provides those libraries satisfies the package, which
+    # keeps it usable on Fedora, RHEL and openSUSE alike.
     cat > "$RPMTOP/SPECS/qutetavern.spec" <<EOF
 Name:      qutetavern
 Version:   $VERSION
@@ -69,9 +108,7 @@ BuildArch: x86_64
 Source0:   payload.tar.gz
 
 %description
-QuteTavern supervises the SillyTavern server as a child process and shows its
-web interface in an embedded Chromium window (Qt WebEngine). It installs and
-updates SillyTavern, and starts or stops the backend with one click.
+$SUMMARY_LONG
 
 %install
 rm -rf %{buildroot}
@@ -79,7 +116,6 @@ mkdir -p %{buildroot}
 tar -C %{buildroot} -xzf %{SOURCE0}
 
 %files
-$PREFIX
 /usr/bin/qutetavern
 /usr/share/applications/qutetavern.desktop
 /usr/share/icons/hicolor/256x256/apps/qutetavern.png
@@ -94,30 +130,5 @@ EOF
     cp "$RPMTOP"/RPMS/*/*.rpm "$OUTDIR/QuteTavern-$VERSION-x86_64.rpm"
     echo "built $OUTDIR/QuteTavern-$VERSION-x86_64.rpm"
 else
-    echo "warning: rpmbuild is not installed, skipping the RPM package" >&2
-fi
-
-# ---------- Debian ----------
-if command -v dpkg-deb >/dev/null 2>&1; then
-    mkdir -p "$ROOT/DEBIAN"
-    cat > "$ROOT/DEBIAN/control" <<EOF
-Package: qutetavern
-Version: $VERSION
-Section: games
-Priority: optional
-Architecture: amd64
-Maintainer: $MAINTAINER
-Installed-Size: $SIZE_KB
-Depends: libc6 (>= 2.35), libgl1, libx11-6, libxcb1, libxkbcommon0, libfontconfig1, libfreetype6, libnss3, libnspr4, libasound2, libdbus-1-3, libgbm1
-Homepage: $HOMEPAGE
-Description: $DESCRIPTION
- QuteTavern supervises the SillyTavern server as a child process and shows its
- web interface in an embedded Chromium window (Qt WebEngine). It installs and
- updates SillyTavern, and starts or stops the backend with one click.
-EOF
-
-    dpkg-deb --build --root-owner-group "$ROOT" "$OUTDIR/QuteTavern-$VERSION-amd64.deb" >/dev/null
-    echo "built $OUTDIR/QuteTavern-$VERSION-amd64.deb"
-else
-    echo "warning: dpkg-deb is not installed, skipping the Debian package" >&2
+    echo "note: rpmbuild is not available, skipping the RPM package"
 fi
