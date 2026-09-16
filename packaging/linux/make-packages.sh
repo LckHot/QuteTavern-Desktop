@@ -54,10 +54,12 @@ if command -v dpkg-deb >/dev/null 2>&1; then
     # and started on Ubuntu 22.04 before it is published). dpkg-shlibdeps is
     # deliberately not used: the build links the official Qt 6.2.4 binaries,
     # whose libraries belong to no Debian package.
+    # qt6-qpa-plugins (platform plugins) and libqt6webenginecore6-bin (the
+    # WebEngine helper process and its resources) are runtime-only packages
+    # that the shared library list above cannot express
     DEPENDS="libc6 (>= 2.35), libgcc-s1, libstdc++6, libgl1, libx11-6, libx11-xcb1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libnss3, libnspr4, libasound2, libdbus-1-3, libgbm1, libqt6core6 (>= 6.2), libqt6gui6 (>= 6.2), libqt6widgets6 (>= 6.2), libqt6network6 (>= 6.2), libqt6opengl6 (>= 6.2), libqt6printsupport6 (>= 6.2), libqt6webchannel6 (>= 6.2), libqt6positioning6 (>= 6.2), libqt6webenginecore6 (>= 6.2), libqt6webenginewidgets6 (>= 6.2), libqt6webenginecore6-bin (>= 6.2), qt6-qpa-plugins"
     # WebEngine needs its runtime data (helper process, resources) and Qt its
     # platform plugins; neither is covered by the shared library dependencies
-    DEPENDS="$DEPENDS, qt6-qpa-plugins, libqt6webenginecore6-bin"
 
     mkdir -p "$ROOT/DEBIAN"
     cat > "$ROOT/DEBIAN/control" <<EOF
@@ -74,6 +76,7 @@ Description: $DESCRIPTION
 $SUMMARY_LONG
 EOF
 
+    echo "  Depends: $DEPENDS"
     dpkg-deb --build --root-owner-group "$ROOT" "$OUTDIR/QuteTavern-$VERSION-amd64.deb" >/dev/null
     echo "built $OUTDIR/QuteTavern-$VERSION-amd64.deb"
     echo "  Depends: $DEPENDS"

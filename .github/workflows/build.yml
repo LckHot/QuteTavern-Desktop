@@ -516,8 +516,10 @@ jobs:
           # install it for real, start it once, remove it again
           sudo dpkg -i "$DEB"
           test -x /usr/bin/qutetavern
-          test -e /usr/lib/x86_64-linux-gnu/qt6/libexec/QtWebEngineProcess \
-            || { echo "::error::the WebEngine runtime is not installed"; exit 1; }
+          # the layout differs per distribution, so the helper is located by name
+          QTPROC=$(find /usr/lib -name QtWebEngineProcess -type f 2>/dev/null | head -1)
+          [ -n "$QTPROC" ] || { echo "::error::the WebEngine runtime is not installed"; exit 1; }
+          echo "WebEngine helper: $QTPROC"
           set +e
           QT_QPA_PLATFORM=offscreen timeout 12 /usr/bin/qutetavern >deb-run.log 2>&1
           rc=$?
