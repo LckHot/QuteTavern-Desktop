@@ -44,6 +44,13 @@ void openPath(const QString &path);
 // identified, all candidates are returned.
 QList<qint64> findStPids(int port);
 
+// Parse the PID(s) listening on `port` from `netstat -ano -p tcp` output. The
+// state column is localized on non-English Windows ("ABHÖREN" on German), so a
+// listening row is recognized by its wildcard foreign address (0.0.0.0:0 /
+// [::]:0) instead of the state text. Defined on every platform so it stays
+// unit-testable; used by the Windows branch of findStPids().
+QList<qint64> parseNetstatListeners(const QString &output, int port);
+
 // Terminate foreign instances (SIGTERM -> 3s -> SIGKILL / taskkill on Windows).
 // Returns how many processes were actually signalled.
 int killForeignBackends(int port);

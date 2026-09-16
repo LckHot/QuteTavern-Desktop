@@ -357,24 +357,39 @@ QList<qint64> findStPids(int port)
             pids.append(pid);
     }
 #else
-    // Windows: find the PID listening on the port via netstat
+    // Windows: find the PID listening on the port via netstat. The state column
+    // is localized (German "ABHÖREN" etc.), so the rows are parsed without it.
     QProcess netstat;
     netstat.start("netstat", {"-ano", "-p", "tcp"});
     netstat.waitForFinished(5000);
-    const auto lines = QString::fromUtf8(netstat.readAllStandardOutput()).split('\n');
-    const QString needle = QStringLiteral(":%1 ").arg(port);
+    pids = parseNetstatListeners(QString::fromUtf8(netstat.readAllStandardOutput()), port);
+#endif
+    return pids;
+}
+
+QList<qint64> parseNetstatListeners(const QString &output, int port)
+{
+    // Rows look like (state text varies with the Windows display language):
+    //   TCP    127.0.0.1:8000     0.0.0.0:0        LISTENING   4242
+    //   TCP    127.0.0.1:8000     127.0.0.1:58527  ESTABLISHED 4242
+    QList<qint64> pids;
+    const QString needle = QStringLiteral(":%1").arg(port);
+    const auto lines = output.split('\n');
     for (const QString &line : lines) {
-        if (!line.contains(needle) || !line.contains("LISTENING", Qt::CaseInsensitive))
+        const QStringList parts =
+            line.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+        if (parts.size() < 4)
             continue;
-        const QStringList parts = line.trimmed().split(' ', Qt::SkipEmptyParts);
-        if (parts.isEmpty())
+        if (!parts.at(1).endsWith(needle)) // the local address carries the port
             continue;
+        const QString foreign = parts.at(2);
+        if (foreign != QStringLiteral("0.0.0.0:0") && foreign != QStringLiteral("[::]:0"))
+            continue; // only wildcard peers listen; anything else has a real connection
         bool ok = false;
         const qint64 pid = parts.last().toLongLong(&ok);
-        if (ok && pid > 0)
+        if (ok && pid > 0 && !pids.contains(pid))
             pids.append(pid);
     }
-#endif
     return pids;
 }
 

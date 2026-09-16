@@ -3,6 +3,7 @@
 
 #include "Util.h"
 
+#include <QCoreApplication>
 #include <QDialog>
 #include <QDir>
 #include <QFileInfo>
@@ -13,10 +14,12 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSysInfo>
 #include <QTemporaryFile>
+#include <QThread>
 #include <QVBoxLayout>
 
 namespace {
@@ -172,6 +175,10 @@ private:
     void fetchMinGitUrl(); // MinGit is the portable git fallback for Windows only
 #endif
     void downloadToFile(const QUrl &url, const std::function<void(const QString &)> &onSaved);
+    // Extraction blocks for seconds to minutes (the system tar runs to
+    // completion); it happens on a worker and reports back on the main thread
+    void extractArchiveAsync(const QString &archive, const QString &destDir, int stripComponents,
+                             const std::function<void(bool, const QString &err)> &done);
     void finishOk();
 
     bool m_nodeMissing, m_gitMissing;
@@ -237,38 +244,39 @@ void EnvDialog::fetchNodeVersion()
                            m_status->setText(QStringLiteral("Extracting Node.js..."));
                            const QString dest = Util::runtimeDir() + "/node-dist";
                            QDir(dest).removeRecursively();
-                           QString err;
                            // The official archives contain a single top-level
                            // node-vX-<os>-<arch>/ directory; stripping it yields
                            // <dest>/bin/node (on Windows <dest>/node.exe)
-                           if (!Util::extractArchive(path, dest, 1, &err)) {
-                               m_status->setText(QStringLiteral("Extraction failed: %1").arg(err));
-                               m_exitBtn->setText(QStringLiteral("Close"));
-                               m_dlBtn->setEnabled(true);
-                               return;
-                           }
-                           // Verify the extracted layout (catches unexpected archives).
-                           // The preprocessor condition stays outside of
-                           // QStringLiteral(): MSVC cannot expand a macro whose
-                           // argument contains preprocessor directives.
+                           extractArchiveAsync(path, dest, 1, [this, dest](bool ok, const QString &err) {
+                               if (!ok) {
+                                   m_status->setText(QStringLiteral("Extraction failed: %1").arg(err));
+                                   m_exitBtn->setText(QStringLiteral("Close"));
+                                   m_dlBtn->setEnabled(true);
+                                   return;
+                               }
+                               // Verify the extracted layout (catches unexpected archives).
+                               // The preprocessor condition stays outside of
+                               // QStringLiteral(): MSVC cannot expand a macro whose
+                               // argument contains preprocessor directives.
 #ifdef Q_OS_WIN
-                           const QString nodeExe = QStringLiteral("/node.exe");
+                               const QString nodeExe = QStringLiteral("/node.exe");
 #else
-                           const QString nodeExe = QStringLiteral("/node");
+                               const QString nodeExe = QStringLiteral("/node");
 #endif
-                           const QString nodeBin = Util::nodeBinDir() + nodeExe;
-                           if (!QFileInfo::exists(nodeBin)) {
-                               QDir(dest).removeRecursively();
-                               m_status->setText(QStringLiteral(
-                                   "The extracted archive does not contain a node executable "
-                                   "(unexpected layout).\n"
-                                   "You can quit and install Node.js (>= 20) manually."));
-                               m_exitBtn->setText(QStringLiteral("Close"));
-                               m_dlBtn->setEnabled(true);
-                               return;
-                           }
-                           m_step = 1;
-                           nextStep();
+                               const QString nodeBin = Util::nodeBinDir() + nodeExe;
+                               if (!QFileInfo::exists(nodeBin)) {
+                                   QDir(dest).removeRecursively();
+                                   m_status->setText(QStringLiteral(
+                                       "The extracted archive does not contain a node executable "
+                                       "(unexpected layout).\n"
+                                       "You can quit and install Node.js (>= 20) manually."));
+                                   m_exitBtn->setText(QStringLiteral("Close"));
+                                   m_dlBtn->setEnabled(true);
+                                   return;
+                               }
+                               m_step = 1;
+                               nextStep();
+                           });
                        });
     });
 }
@@ -311,12 +319,12 @@ void EnvDialog::fetchMinGitUrl()
             m_status->setText(QStringLiteral("Extracting MinGit..."));
             const QString dest = Util::runtimeDir() + "/mingit";
             QDir(dest).removeRecursively();
-            QString err;
             // The MinGit zip has no top-level directory, so nothing is stripped
-            if (!Util::extractArchive(path, dest, 0, &err)) {
-                m_status->setText(QStringLiteral("Extraction failed: %1").arg(err));
-            }
-            finishOk();
+            extractArchiveAsync(path, dest, 0, [this](bool ok, const QString &err) {
+                if (!ok)
+                    m_status->setText(QStringLiteral("Extraction failed: %1").arg(err));
+                finishOk();
+            });
         });
     });
 }
@@ -360,6 +368,34 @@ void EnvDialog::downloadToFile(const QUrl &url,
         m_tmp.close();
         onSaved(m_tmp.fileName());
     });
+}
+
+void EnvDialog::extractArchiveAsync(const QString &archive, const QString &destDir,
+                                    int stripComponents,
+                                    const std::function<void(bool, const QString &)> &done)
+{
+    // The archives are 30-45 MB and extraction needs seconds to a minute:
+    // blocking the dialog here would freeze the window (DESIGN section 8.1 asks
+    // for the opposite). The result is posted back to qApp and the QPointer
+    // drops it when the dialog was closed while the worker was running.
+    if (m_bar) {
+        m_bar->setRange(0, 0); // indeterminate: extraction reports no progress
+        m_bar->show();
+    }
+    const QPointer<EnvDialog> guard(this);
+    auto *worker = QThread::create([archive, destDir, stripComponents, done, guard] {
+        QString err;
+        const bool ok = Util::extractArchive(archive, destDir, stripComponents, &err);
+        QMetaObject::invokeMethod(qApp, [guard, done, ok, err] {
+            if (!guard)
+                return;
+            if (guard->m_bar)
+                guard->m_bar->setRange(0, 100);
+            done(ok, err);
+        });
+    });
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+    worker->start();
 }
 
 void EnvDialog::finishOk()

@@ -47,6 +47,9 @@ private slots:
 
     void pickLatestVersionTag_skipsPreReleases();
     void pickLatestVersionTag_emptyWhenOnlySpecialTags();
+
+    void parseNetstatListeners_ignoresTheStateLanguage();
+    void parseNetstatListeners_skipsNonListeningRows();
 };
 
 void TestQuteTavern::ansiStrip_removesColorSequences()
@@ -162,6 +165,30 @@ void TestQuteTavern::pickLatestVersionTag_emptyWhenOnlySpecialTags()
     // Plain numeric tags are the only accepted form ("v2.0.0" is not one)
     const QStringList tags{QStringLiteral("release"), QStringLiteral("v2.0.0")};
     QVERIFY(Updater::pickLatestVersionTag(tags).isEmpty());
+}
+
+void TestQuteTavern::parseNetstatListeners_ignoresTheStateLanguage()
+{
+    // German Windows netstat output: the state column reads "ABHÖREN". The
+    // parser must not depend on it - a wildcard peer address means listening.
+    // 18000 must not match a query for 8000, and the duplicate PID from the
+    // IPv4+IPv6 rows is emitted once.
+    const QString output = QString::fromUtf8(
+        "\nAktive Verbindungen\n\n"
+        "  Proto  Lokale Adresse         Remoteadresse          Status       PID\n"
+        "  TCP    127.0.0.1:8000         0.0.0.0:0              ABHÖREN      4242\n"
+        "  TCP    [::]:8000              [::]:0                 ABHÖREN      4242\n"
+        "  TCP    0.0.0.0:18000          0.0.0.0:0              ABHÖREN      9999\n");
+    QCOMPARE(Util::parseNetstatListeners(output, 8000), (QList<qint64>{4242}));
+}
+
+void TestQuteTavern::parseNetstatListeners_skipsNonListeningRows()
+{
+    const QString output = QStringLiteral(
+        "  TCP    127.0.0.1:8000         127.0.0.1:58527        ESTABLISHED  1111\n"
+        "  TCP    127.0.0.1:8000         0.0.0.0:0              LISTENING    7777\n"
+        "  TCP    0.0.0.0:18000          0.0.0.0:0              LISTENING    9999\n");
+    QCOMPARE(Util::parseNetstatListeners(output, 8000), (QList<qint64>{7777}));
 }
 
 QTEST_GUILESS_MAIN(TestQuteTavern)
