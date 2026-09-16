@@ -125,14 +125,15 @@ the log are shown in the management window.
 | --- | --- | --- | --- |
 | Launcher configuration | `~/.config/QuteTavern/config.json` | `%LOCALAPPDATA%\QuteTavern\config.json` | `~/Library/Preferences/QuteTavern/config.json` |
 | Downloaded components (Node.js, MinGit) | `~/.local/share/QuteTavern/runtime` | `%APPDATA%\QuteTavern\runtime` | `~/Library/Application Support/QuteTavern/runtime` |
-| SillyTavern data (global mode) | `~/.local/share/SillyTavern` | `%APPDATA%\SillyTavern` | `~/Library/Application Support/SillyTavern` |
+| SillyTavern data (global mode) | `~/.local/share/SillyTavern` | `%LOCALAPPDATA%\SillyTavern\Data` | `~/Library/Application Support/SillyTavern` |
 
 ## Data model (important)
 
 The launcher runs the backend in its **global mode**
 (`node server.js --global`), so data lives in `~/.local/share/SillyTavern`
-(Windows: `%APPDATA%\SillyTavern`; macOS:
-`~/Library/Application Support/SillyTavern`). This is a **separate data world**
+(or `$XDG_DATA_HOME/SillyTavern`; Windows: `%LOCALAPPDATA%\SillyTavern\Data`;
+macOS: `~/Library/Application Support/SillyTavern`) - the same locations
+SillyTavern itself uses. This is a **separate data world**
 from running `node server.js` (standalone mode) inside the repository.
 
 ## Known platform differences

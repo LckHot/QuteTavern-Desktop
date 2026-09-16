@@ -25,6 +25,11 @@ RootCheck validateRoot(const QString &path);
 // SillyTavern global data directory (per platform conventions)
 QString stDataDir();
 
+// Read the top-level "port:" entry of a SillyTavern config.yaml and return it,
+// or 0 when the file is missing/the entry is absent or invalid. detectPort()
+// applies the 8000 default; the raw reader is separated out for unit tests.
+int readConfigPort(const QString &configYamlPath);
+
 // Read the top-level "port:" entry of the global config.yaml, default 8000
 int detectPort();
 

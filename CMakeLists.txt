@@ -55,3 +55,27 @@ if(APPLE)
 elseif(WIN32)
     set_target_properties(qutetavern PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
+
+# ---------- unit tests (ctest) ----------
+# Pure-logic tests, no GUI: the parts that break silently. They reuse the same
+# source files as the app so both stay honest about the same code.
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    qt_add_executable(qutetavern-tests
+        tests/tst_qutetavern.cpp
+        src/Util.cpp
+        src/Updater.cpp
+    )
+    target_include_directories(qutetavern-tests PRIVATE src)
+    target_compile_options(qutetavern-tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
+    )
+    target_link_libraries(qutetavern-tests PRIVATE
+        Qt6::Core
+        Qt6::Network
+        Qt6::Test
+    )
+    add_test(NAME qutetavern-tests COMMAND qutetavern-tests)
+endif()

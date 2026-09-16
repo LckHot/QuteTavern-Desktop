@@ -133,7 +133,7 @@ Design notes:
 | Foreign instance discovery | /proc cmdline scan (+ listening-port cross-check) | pgrep -fl filter | netstat -ano to find the listening PID |
 | Foreign instance termination | SIGTERM→3s→SIGKILL | same | taskkill /F |
 | Graceful backend stop | SIGTERM (SillyTavern has cleanup hooks) | same | taskkill (no SIGTERM, statistics may not be flushed) |
-| Data directory | ~/.local/share/SillyTavern | ~/Library/Application Support/SillyTavern | %APPDATA%\SillyTavern |
+| Data directory | ~/.local/share/SillyTavern (or $XDG_DATA_HOME) | ~/Library/Application Support/SillyTavern | %LOCALAPPDATA%\SillyTavern\Data |
 | npm invocation | npm | npm | cmd /c npm (batch script) |
 | Archive extraction | tar | tar (bsdtar) | tar (bundled since Windows 10 1803) |
 

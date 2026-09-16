@@ -95,6 +95,9 @@ jobs:
             exit 1
           fi
 
+      - name: Run the unit tests
+        run: ctest --test-dir build --output-on-failure
+
       - name: Assemble the AppDir
         run: |
           set -e
@@ -496,6 +499,9 @@ jobs:
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
+
+      - name: Run the unit tests (also on the Qt 6.2 floor)
+        run: ctest --test-dir build --output-on-failure
 
       - name: Build the .deb and the .rpm
         run: |

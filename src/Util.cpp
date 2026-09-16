@@ -169,30 +169,47 @@ RootCheck validateRoot(const QString &path)
 
 QString stDataDir()
 {
+    // SillyTavern resolves its global data directory with env-paths
+    // (suffix: ''), so these paths mirror that library exactly:
+    //   Windows  %LOCALAPPDATA%\SillyTavern\Data   (never the roaming %APPDATA%)
+    //   macOS    ~/Library/Application Support/SillyTavern
+    //   Linux    $XDG_DATA_HOME/SillyTavern, default ~/.local/share/SillyTavern
 #if defined(Q_OS_WIN)
-    return qEnvironmentVariable("APPDATA") + "/SillyTavern";
+    QString base = qEnvironmentVariable("LOCALAPPDATA");
+    if (base.isEmpty()) // env-paths falls back to the home directory too
+        base = QDir::homePath() + QStringLiteral("/AppData/Local");
+    return base + QStringLiteral("/SillyTavern/Data");
 #elif defined(Q_OS_MAC)
-    return QDir::homePath() + "/Library/Application Support/SillyTavern";
+    return QDir::homePath() + QStringLiteral("/Library/Application Support/SillyTavern");
 #else
-    return QDir::homePath() + "/.local/share/SillyTavern";
+    QString base = qEnvironmentVariable("XDG_DATA_HOME");
+    if (base.isEmpty())
+        base = QDir::homePath() + QStringLiteral("/.local/share");
+    return base + QStringLiteral("/SillyTavern");
 #endif
+}
+
+int readConfigPort(const QString &configYamlPath)
+{
+    QFile f(configYamlPath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return 0;
+    while (!f.atEnd()) {
+        const QString line = QString::fromUtf8(f.readLine());
+        if (line.startsWith(QStringLiteral("port:"))) {
+            bool ok = false;
+            const int port = line.mid(5).trimmed().toInt(&ok);
+            if (ok && port > 0 && port < 65536)
+                return port;
+        }
+    }
+    return 0;
 }
 
 int detectPort()
 {
-    QFile f(stDataDir() + "/config.yaml");
-    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        while (!f.atEnd()) {
-            const QString line = QString::fromUtf8(f.readLine());
-            if (line.startsWith(QStringLiteral("port:"))) {
-                bool ok = false;
-                const int port = line.mid(5).trimmed().toInt(&ok);
-                if (ok && port > 0 && port < 65536)
-                    return port;
-            }
-        }
-    }
-    return 8000;
+    const int port = readConfigPort(stDataDir() + QStringLiteral("/config.yaml"));
+    return port > 0 ? port : 8000;
 }
 
 QString ansiStrip(const QString &s)
