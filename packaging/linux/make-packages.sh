@@ -18,9 +18,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MAINTAINER="${MAINTAINER:-QuteTavern contributors <LckHot@users.noreply.github.com>}"
 HOMEPAGE="https://github.com/LckHot/QuteTavern-Desktop"
 DESCRIPTION="Desktop launcher for SillyTavern"
-SUMMARY_LONG="QuteTavern supervises the SillyTavern server as a child process and shows its
- web interface in an embedded Chromium window (Qt WebEngine). It installs and
- updates SillyTavern, and starts or stops the backend with one click."
+# Every line starts with a space: the Debian control format needs that for
+# description continuation lines
+SUMMARY_LONG=" QuteTavern supervises the SillyTavern server as a child process and shows its
+  web interface in an embedded Chromium window (Qt WebEngine). It installs and
+  updates SillyTavern, and starts or stops the backend with one click."
 
 [ -x "$BINARY" ] || { echo "error: $BINARY is not executable" >&2; exit 1; }
 mkdir -p "$OUTDIR"
@@ -53,13 +55,18 @@ if command -v dpkg-deb >/dev/null 2>&1; then
     DEPENDS=""
     if command -v dpkg-shlibdeps >/dev/null 2>&1; then
         mkdir -p "$WORK/dpkg/debian"
-        printf 'Source: qutetavern\nPackage: qutetavern\n' > "$WORK/dpkg/debian/control"
-        DEPENDS="$(cd "$WORK/dpkg" && dpkg-shlibdeps -O -e "$ROOT/usr/bin/qutetavern" 2>/dev/null \
-                   | sed -n 's/^shlibs:Depends=//p')" || true
+        printf 'Source: qutetavern\nPackage: qutetavern\nArchitecture: amd64\n' \
+            > "$WORK/dpkg/debian/control"
+        ( cd "$WORK/dpkg" && dpkg-shlibdeps -O -e "$ROOT/usr/bin/qutetavern" ) \
+            > "$WORK/shlibs.txt" 2> "$WORK/shlibs.err" || true
+        DEPENDS="$(sed -n 's/^shlibs:Depends=//p' "$WORK/shlibs.txt")"
+        if [ -s "$WORK/shlibs.err" ]; then
+            sed 's/^/  shlibdeps: /' "$WORK/shlibs.err" >&2
+        fi
     fi
     if [ -z "$DEPENDS" ]; then
         echo "warning: dpkg-shlibdeps produced nothing, falling back to a static list" >&2
-        DEPENDS="libc6, libstdc++6, libqt6core6, libqt6gui6, libqt6widgets6, libqt6network6, libqt6webenginewidgets6"
+        DEPENDS="libc6 (>= 2.35), libstdc++6, libqt6core6, libqt6gui6, libqt6widgets6, libqt6network6, libqt6webenginewidgets6"
     fi
     # WebEngine needs its runtime data (helper process, resources) and Qt its
     # platform plugins; neither is covered by the shared library dependencies
