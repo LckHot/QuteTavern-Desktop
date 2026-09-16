@@ -1,0 +1,464 @@
+name: Build packages
+
+# Builds the three platform packages on every push / pull request and attaches
+# them to a GitHub release when a v* tag is pushed.
+#
+# The packages are only considered good when the verification steps below pass:
+# each platform asserts that the Qt WebEngine runtime is complete and that the
+# packaged application actually starts (headless, with the offscreen platform).
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Official Qt binaries (same version everywhere). 6.11+ is not usable yet:
+  # its Windows repository layout is not understood by aqt 3.3.0.
+  QT_VERSION: '6.10.3'
+
+jobs:
+  linux-appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Determine the version
+        run: |
+          VERSION=$(sed -n 's/.*project(qutetavern VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version: $VERSION"
+
+      # Qt comes from the official binaries, exactly like on Windows and macOS.
+      # The distribution packages of Ubuntu 22.04 are both old (Qt 6.2) and
+      # split in ways that break CMake: WebEngine needs its dictionary tool from
+      # a separate package and Quick pulls in Qt6OpenGL, which is yet another
+      # package. The official Qt installation is complete and has a predictable
+      # layout (libexec/, resources/, translations/).
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          # qtserialport is a dependency of the NMEA plugin that ships with
+          # qtpositioning; without it the Qt deployment step fails
+          modules: 'qtwebengine qtwebchannel qtpositioning qtserialport'
+          cache: true
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          # Headers Qt needs in order to compile, plus the runtime libraries that
+          # have to end up inside the AppImage
+          PACKAGES="
+            build-essential cmake
+            libgl1-mesa-dev libglu1-mesa-dev
+            libxkbcommon-dev libxkbcommon-x11-0
+            libfontconfig1-dev libfreetype6-dev
+            libx11-dev libx11-xcb-dev libxcb1-dev libxcb-icccm4-dev
+            libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev
+            libxcb-render-util0-dev libxcb-shape0-dev libxcb-sync-dev
+            libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-cursor0
+            libnss3 libnspr4 libasound2 libdbus-1-3 libgbm1
+            squashfs-tools file wget desktop-file-utils"
+          # Skip names the image does not know instead of failing the whole job
+          INSTALL=""
+          for p in $PACKAGES; do
+            if apt-cache show "$p" >/dev/null 2>&1; then
+              INSTALL="$INSTALL $p"
+            else
+              echo "::warning::package $p is not available on this runner image"
+            fi
+          done
+          sudo apt-get install -y --no-install-recommends $INSTALL
+
+      - name: Configure and build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+          echo "Qt used: $QT_ROOT_DIR ($("$QT_ROOT_DIR/bin/qmake" -query QT_VERSION))"
+          # A library that cannot be resolved would only surface at runtime, so
+          # check it while we are still on the build machine
+          if ldd build/qutetavern | grep -q "not found"; then
+            ldd build/qutetavern | grep "not found"
+            echo "::error::the built binary has unresolved libraries"
+            exit 1
+          fi
+
+      - name: Assemble the AppDir
+        run: |
+          set -e
+          : "${QT_ROOT_DIR:?QT_ROOT_DIR is not set by install-qt-action}"
+          # The official Qt layout is fixed; if a file is missing, say so loudly
+          # instead of shipping a bundle without WebEngine
+          for f in libexec/QtWebEngineProcess resources/icudtl.dat \
+                   translations/qtwebengine_locales; do
+            if [ ! -e "$QT_ROOT_DIR/$f" ]; then
+              echo "::error::$QT_ROOT_DIR/$f is missing (unexpected Qt layout)"
+              ls -1 "$QT_ROOT_DIR"
+              exit 1
+            fi
+          done
+
+          rm -rf AppDir
+          mkdir -p AppDir/usr/bin AppDir/usr/libexec AppDir/usr/translations \
+                   AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+
+          install -Dm755 build/qutetavern AppDir/usr/bin/qutetavern
+          cp resources/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/qutetavern.png
+          cp packaging/linux/qutetavern.desktop AppDir/usr/share/applications/
+
+          # Qt WebEngine runtime: the helper process, the resources and the locale
+          # packs have to sit at the paths QLibraryInfo resolves to once the Qt
+          # libraries are bundled (usr/libexec, usr/resources, usr/translations)
+          install -Dm755 "$QT_ROOT_DIR/libexec/QtWebEngineProcess" AppDir/usr/libexec/QtWebEngineProcess
+          mkdir -p AppDir/usr/resources AppDir/usr/translations/qtwebengine_locales
+          cp -a "$QT_ROOT_DIR/resources/." AppDir/usr/resources/
+          cp -a "$QT_ROOT_DIR/translations/qtwebengine_locales/." AppDir/usr/translations/qtwebengine_locales/
+
+          # license notices travel inside the bundle
+          mkdir -p AppDir/usr/share/doc/qutetavern
+          cp THIRD_PARTY_NOTICES.md AppDir/usr/share/doc/qutetavern/
+          if [ -f LICENSE ]; then cp LICENSE AppDir/usr/share/doc/qutetavern/; fi
+
+      - name: Bundle the shared libraries (linuxdeploy + Qt plugin)
+        run: |
+          set -e
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export QML_SOURCES_PATHS=""           # widgets only, no QML to scan
+          # the tools live in /tmp so that the working directory only contains
+          # the artifact we build
+          mkdir -p /tmp/tools
+          wget -q -O /tmp/tools/linuxdeploy.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q -O /tmp/tools/linuxdeploy-plugin-qt.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x /tmp/tools/*.AppImage
+          # plugins are looked up next to the linuxdeploy binary, so keep both together
+          /tmp/tools/linuxdeploy.AppImage \
+            --appdir AppDir \
+            --desktop-file packaging/linux/qutetavern.desktop \
+            --icon-file resources/icon.png \
+            --custom-apprun packaging/linux/AppRun \
+            --plugin qt \
+            --output appimage
+
+      - name: Rename the artifact
+        run: |
+          set -e
+          ARTIFACT=$(ls *.AppImage | head -1)
+          mv "$ARTIFACT" "QuteTavern-${APP_VERSION}-x86_64.AppImage"
+          ls -l "QuteTavern-${APP_VERSION}-x86_64.AppImage"
+
+      - name: Verify the bundle contents
+        run: |
+          set -e
+          test -f AppDir/usr/libexec/QtWebEngineProcess
+          test -f AppDir/usr/resources/icudtl.dat
+          test -d AppDir/usr/translations/qtwebengine_locales
+          test -f AppDir/usr/lib/libQt6WebEngineCore.so.6
+          test -x AppDir/AppRun
+          echo "WebEngine helper, resources, locales and libraries are in place"
+          # nothing the bundle needs may be missing
+          if LD_LIBRARY_PATH="$PWD/AppDir/usr/lib:$PWD/AppDir/usr/lib/x86_64-linux-gnu" \
+               ldd AppDir/usr/libexec/QtWebEngineProcess | grep -q "not found"; then
+            LD_LIBRARY_PATH="$PWD/AppDir/usr/lib:$PWD/AppDir/usr/lib/x86_64-linux-gnu" \
+              ldd AppDir/usr/libexec/QtWebEngineProcess | grep "not found"
+            echo "::error::the bundled QtWebEngineProcess has unresolved dependencies"
+            exit 1
+          fi
+          echo "QtWebEngineProcess resolves every dependency inside the bundle"
+
+      - name: Startup smoke test (headless)
+        run: |
+          set -e
+          set +e
+          QT_QPA_PLATFORM=offscreen timeout 12 \
+            ./QuteTavern-${APP_VERSION}-x86_64.AppImage --appimage-extract-and-run >out.log 2>&1
+          rc=$?
+          set -e
+          cat out.log
+          if [ "$rc" != "124" ]; then
+            echo "::error::the AppImage did not stay alive (exit code $rc)"
+            exit 1
+          fi
+          echo "the AppImage started and stayed alive"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-appimage
+          path: QuteTavern-*-x86_64.AppImage
+          if-no-files-found: error
+
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Determine the version
+        shell: bash
+        run: |
+          VERSION=$(sed -n 's/.*project(qutetavern VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version: $VERSION"
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          modules: 'qtwebengine qtwebchannel qtpositioning qtserialport'
+          cache: true
+
+      - name: Configure and build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel
+
+      - name: Deploy the Qt runtime
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item build\Release\qutetavern.exe dist\
+          # windeployqt also copies QtWebEngineProcess.exe, its resources and the
+          # locale packs; the compiler runtime is bundled so no VC++ redistributable
+          # has to be installed by the user.
+          windeployqt --release --compiler-runtime --no-translations dist\qutetavern.exe
+          # license notices travel inside the installation
+          Copy-Item THIRD_PARTY_NOTICES.md dist\
+          if (Test-Path LICENSE) { Copy-Item LICENSE dist\ }
+          Get-ChildItem dist | Select-Object -First 20 Name
+
+      - name: Verify the deployment
+        run: |
+          $required = @(
+            "dist\qutetavern.exe",
+            "dist\Qt6Core.dll",
+            "dist\Qt6WebEngineCore.dll",
+            "dist\QtWebEngineProcess.exe",
+            "dist\resources\icudtl.dat",
+            "dist\translations\qtwebengine_locales"
+          )
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) { throw "missing in the deployment: $item" }
+          }
+          Write-Host "the Qt WebEngine runtime is complete"
+
+      - name: Startup smoke test (headless)
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath "dist\qutetavern.exe" -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { throw "the packaged app exited immediately (exit code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "the packaged app started and stayed alive"
+
+      - name: Build the NSIS installer
+        run: |
+          choco install nsis --no-progress -y
+          if (Get-Command magick -ErrorAction SilentlyContinue) {
+            magick resources\icon.png -define icon:auto-resize=256,128,64,48,32,16 resources\icon.ico
+          }
+          # NSIS resolves relative paths against the script directory, so both
+          # the source directory and the output file are passed as absolute paths
+          $sourceDir = (Resolve-Path dist).Path
+          $setup = Join-Path $PWD "QuteTavern-$env:APP_VERSION-Setup.exe"
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" `
+              /DVERSION=$env:APP_VERSION "/DSOURCE_DIR=$sourceDir" "/DOUTFILE=$setup" `
+              packaging\windows\installer.nsi
+          if (-not (Test-Path $setup)) { throw "the installer was not produced" }
+          Write-Host "built $setup"
+
+      - name: Install and uninstall test
+        run: |
+          $setup = "QuteTavern-$env:APP_VERSION-Setup.exe"
+          Start-Process -FilePath $setup -ArgumentList "/S" -Wait
+          $dir = Join-Path $env:LOCALAPPDATA "Programs\QuteTavern"
+          $exe = Join-Path $dir "qutetavern.exe"
+          if (-not (Test-Path $exe)) { throw "the silent installation did not install the app" }
+          if (-not (Test-Path (Join-Path $dir "Uninstall.exe"))) { throw "no uninstaller was installed" }
+
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { throw "the installed app exited immediately (exit code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+
+          Start-Process -FilePath (Join-Path $dir "Uninstall.exe") -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 5
+          if (Test-Path $exe) { throw "the uninstaller left files behind" }
+          Write-Host "install + start + uninstall round trip succeeded"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer
+          path: QuteTavern-*-Setup.exe
+          if-no-files-found: error
+
+  macos-pkg:
+    name: macOS package
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Determine the version
+        run: |
+          VERSION=$(sed -n 's/.*project(qutetavern VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version: $VERSION"
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: 'qtwebengine qtwebchannel qtpositioning qtserialport'
+          cache: true
+
+      - name: Configure and build (universal binary)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          cmake --build build --parallel
+
+      - name: Assemble the app bundle
+        run: |
+          set -e
+          rm -rf dist && mkdir -p dist
+          cp -R build/qutetavern.app "dist/QuteTavern.app"
+          # CMake creates the bundle without a Resources directory when it holds
+          # no resources yet, but the icon and the notices go in there
+          mkdir -p "dist/QuteTavern.app/Contents/Resources"
+
+          # application icon (icns generated from the shared png)
+          rm -rf icon.iconset && mkdir icon.iconset
+          gen() { sips -z "$1" "$1" resources/icon.png --out "icon.iconset/$2" >/dev/null; }
+          gen 16 icon_16x16.png
+          gen 32 icon_16x16@2x.png
+          gen 32 icon_32x32.png
+          gen 64 icon_32x32@2x.png
+          gen 128 icon_128x128.png
+          gen 256 icon_128x128@2x.png
+          gen 256 icon_256x256.png
+          gen 512 icon_256x256@2x.png
+          gen 512 icon_512x512.png
+          gen 1024 icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o icon.icns
+          cp icon.icns "dist/QuteTavern.app/Contents/Resources/"
+
+          PLIST="dist/QuteTavern.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName 'QuteTavern'" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'QuteTavern'" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'QuteTavern'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString '${APP_VERSION}'" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion '${APP_VERSION}'" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string icon.icns" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile icon.icns" "$PLIST"
+
+          # license notices travel inside the bundle (must be added before signing)
+          cp THIRD_PARTY_NOTICES.md "dist/QuteTavern.app/Contents/Resources/"
+          if [ -f LICENSE ]; then cp LICENSE "dist/QuteTavern.app/Contents/Resources/"; fi
+
+      - name: Deploy the Qt frameworks
+        run: |
+          set -e
+          "$QT_ROOT_DIR/bin/macdeployqt" "dist/QuteTavern.app" -verbose=1
+
+      - name: Verify the bundle contents
+        run: |
+          set -e
+          APP="dist/QuteTavern.app"
+          test -d "$APP/Contents/Frameworks/QtWebEngineCore.framework"
+          test -f "$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app/Contents/MacOS/QtWebEngineProcess"
+          test -f "$APP/Contents/Resources/icudtl.dat" || \
+            test -f "$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Resources/icudtl.dat"
+          echo "the WebEngine framework and its helper process are in place"
+          lipo -info "$APP/Contents/MacOS/qutetavern"
+
+      - name: Sign (ad-hoc) and verify the signature
+        run: |
+          set -e
+          # An ad-hoc signature is mandatory on Apple silicon: unsigned binaries
+          # are killed by the kernel. Replace it with a Developer ID signature
+          # (and notarization) for distribution outside the project.
+          codesign --force --deep --sign - "dist/QuteTavern.app"
+          codesign --verify --deep --strict "dist/QuteTavern.app"
+          echo "ad-hoc signature verified"
+
+      - name: Startup smoke test (headless)
+        run: |
+          set -e
+          APP_EXE="dist/QuteTavern.app/Contents/MacOS/qutetavern"
+          QT_QPA_PLATFORM=offscreen "$APP_EXE" >smoke.log 2>&1 &
+          PID=$!
+          sleep 10
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "::error::the packaged app exited immediately"
+            cat smoke.log
+            exit 1
+          fi
+          kill "$PID" || true
+          echo "the packaged app started and stayed alive"
+
+      - name: Build the .pkg
+        run: |
+          set -e
+          PKG="QuteTavern-${APP_VERSION}-universal.pkg"
+          pkgbuild --component "dist/QuteTavern.app" \
+                   --install-location /Applications \
+                   --identifier io.github.lckhot.qutetavern \
+                   --version "${APP_VERSION}" \
+                   "$PKG"
+          ls -l "$PKG"
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+
+      - name: Install and run the packaged app
+        run: |
+          set -e
+          sudo installer -pkg "$PKG" -target /
+          APP="/Applications/QuteTavern.app"
+          test -d "$APP" || { echo "::error::the package did not install the app"; exit 1; }
+          QT_QPA_PLATFORM=offscreen "$APP/Contents/MacOS/qutetavern" >smoke2.log 2>&1 &
+          PID=$!
+          sleep 10
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "::error::the installed app exited immediately"
+            cat smoke2.log
+            exit 1
+          fi
+          kill "$PID" || true
+          echo "the installed app started and stayed alive"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-pkg
+          path: QuteTavern-*-universal.pkg
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux-appimage, windows-installer, macos-pkg]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Attach the packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # without a checkout gh cannot infer the repository from a remote
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME}"
+          echo "publishing $TAG in $GH_REPO"
+          find artifacts -type f
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "QuteTavern ${TAG}" --generate-notes
+          fi
+          find artifacts -type f -print0 | xargs -0 gh release upload "$TAG" --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name'

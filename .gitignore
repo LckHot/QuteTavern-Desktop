@@ -1,0 +1,8 @@
+build/
+.zcode/
+dist/
+AppDir/
+icon.iconset/
+icon.icns
+*.AppImage
+*.pkg

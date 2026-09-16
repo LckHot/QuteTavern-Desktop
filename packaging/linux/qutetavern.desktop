@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=QuteTavern
+GenericName=AI roleplay client
+Comment=Start the QuteTavern desktop client for SillyTavern
+Exec=qutetavern
+Icon=qutetavern
+Terminal=false
+Categories=Game;Network;
+Keywords=AI;Roleplay;Chat;Tavern;
+StartupWMClass=qutetavern
+StartupNotify=true

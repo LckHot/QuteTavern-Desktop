@@ -1,0 +1,31 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# AppRun for the QuteTavern AppImage.
+#
+# Qt WebEngine expects its helper process, its resources and its locales at
+# fixed locations relative to the Qt prefix; inside the AppDir those are
+# usr/libexec, usr/resources and usr/translations, so they are pointed at
+# explicitly here.
+#
+# The Chromium sandbox is disabled for AppImage runs only: it needs a setuid
+# helper, which cannot exist inside a read-only AppImage, and unprivileged user
+# namespaces are restricted on several distributions. The system-installed
+# build keeps the sandbox enabled.
+set -e
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+export APPDIR="${APPDIR:-$HERE}"
+
+# Prefer the bundled libraries (the AppImage runtime sets this as well, but the
+# AppDir should also work when executed directly)
+export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+export QTWEBENGINEPROCESS_PATH="${APPDIR}/usr/libexec/QtWebEngineProcess"
+export QTWEBENGINE_RESOURCES_PATH="${APPDIR}/usr/resources"
+export QTWEBENGINE_LOCALES_PATH="${APPDIR}/usr/translations/qtwebengine_locales"
+
+if [ -n "${APPIMAGE:-}" ]; then
+    export QTWEBENGINE_DISABLE_SANDBOX=1
+fi
+
+exec "${APPDIR}/usr/bin/qutetavern" "$@"
