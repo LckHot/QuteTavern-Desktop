@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
+#include <QMutex>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -21,6 +22,112 @@
 #endif
 
 namespace Util {
+
+namespace {
+
+// Directories taken from the user's login shell PATH, harvested when a command
+// could not be found in the environment the launcher inherited. Launches from
+// the desktop menu or a double click do not run a login shell, so everything
+// set up only in shell startup files - Homebrew, nvm, hand-picked directories -
+// is invisible to the process. The harvest runs at most once per session, only
+// after a lookup has already failed, and its entries sit behind the inherited
+// PATH, so users whose commands resolve directly are not affected at all.
+QMutex &shellPathMutex()
+{
+    static QMutex mutex;
+    return mutex;
+}
+QStringList g_shellPathDirs;
+bool g_shellPathTried = false;
+
+QStringList builtinRuntimeDirs()
+{
+    QStringList prefixes;
+    const QString nodeBin = Util::nodeBinDir();
+    const QString gitBin = Util::gitBinDir();
+    if (QFileInfo::exists(nodeBin + QStringLiteral("/node"))
+        || QFileInfo::exists(nodeBin + QStringLiteral("/node.exe")))
+        prefixes << nodeBin;
+    if (QFileInfo::exists(gitBin + QStringLiteral("/git.exe")))
+        prefixes << gitBin;
+    return prefixes;
+}
+
+QStringList harvestLoginShellPath()
+{
+#ifdef Q_OS_WIN
+    return {}; // the session there already inherits the PATH from the registry
+#else
+    const QString shellEnv = qEnvironmentVariable("SHELL");
+    QFileInfo shellInfo(shellEnv);
+    QString program = shellInfo.isFile() && shellInfo.isExecutable()
+                          ? shellEnv : QStringLiteral("/bin/bash");
+    if (!QFileInfo(program).isExecutable())
+        return {};
+
+    // fish needs its own syntax to print a colon separated PATH
+    const bool isFish = QFileInfo(program).fileName() == QStringLiteral("fish");
+    const QString command = isFish ? QStringLiteral("string join : $PATH")
+                                   : QStringLiteral("printf %s \"$PATH\"");
+
+    QProcess shell;
+    shell.setProgram(program);
+    shell.setArguments({QStringLiteral("-l"), QStringLiteral("-i"),
+                        QStringLiteral("-c"), command});
+    shell.setProcessChannelMode(QProcess::SeparateChannels);
+    shell.setStandardInputFile(QProcess::nullDevice());
+    shell.start();
+    if (!shell.waitForStarted(1000))
+        return {};
+    // startup files can do anything - never let them stall the launch
+    if (!shell.waitForFinished(3000)) {
+        shell.kill();
+        shell.waitForFinished(1000);
+        return {};
+    }
+    if (shell.exitStatus() != QProcess::NormalExit || shell.exitCode() != 0)
+        return {};
+
+    // PATH itself is one line; startup files may print noise around it
+    const QStringList lines = QString::fromLocal8Bit(shell.readAllStandardOutput())
+                                  .split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    if (lines.isEmpty())
+        return {};
+
+    QStringList dirs;
+    const auto entries = lines.last().split(QDir::listSeparator(), Qt::SkipEmptyParts);
+    for (const QString &entry : entries) {
+        // keep existing absolute directories only - anything else is noise
+        if (!entry.startsWith(QLatin1Char('/')))
+            continue;
+        if (!QDir(entry).exists() || dirs.contains(entry))
+            continue;
+        if (dirs.size() >= 128) // pathological PATHs do not grow without bound
+            break;
+        dirs << entry;
+    }
+    return dirs;
+#endif
+}
+
+const QStringList &shellPathDirs()
+{
+    QMutexLocker lock(&shellPathMutex());
+    if (!g_shellPathTried) {
+        g_shellPathTried = true;
+        g_shellPathDirs = harvestLoginShellPath();
+    }
+    return g_shellPathDirs;
+}
+
+// The child process PATH must never trigger the harvest on its own
+QStringList shellPathDirsIfKnown()
+{
+    QMutexLocker lock(&shellPathMutex());
+    return g_shellPathDirs;
+}
+
+} // namespace
 
 RootCheck validateRoot(const QString &path)
 {
@@ -385,37 +492,55 @@ QString Util::findCommand(const QString &name)
 #else
     candidates << name;
 #endif
-    // commandEnv PATH: system directories first, built-in components last
-    const QStringList prefixes = commandEnv()
-                                     .value(QStringLiteral("PATH"))
-                                     .split(QDir::listSeparator(), Qt::SkipEmptyParts);
-    for (const QString &dir : prefixes) {
-        for (const QString &c : candidates) {
-            const QString full = dir + QStringLiteral("/") + c;
-            if (QFileInfo::exists(full) && QFileInfo(full).isExecutable())
-                return full;
+    auto search = [&candidates](const QStringList &dirs) -> QString {
+        for (const QString &dir : dirs) {
+            for (const QString &c : candidates) {
+                const QString full = dir + QStringLiteral("/") + c;
+                if (QFileInfo::exists(full) && QFileInfo(full).isExecutable())
+                    return full;
+            }
         }
-    }
-    return QString();
+        return QString();
+    };
+
+    // 1) the environment the launcher itself inherited
+    const QStringList inherited = QProcessEnvironment::systemEnvironment()
+                                      .value(QStringLiteral("PATH"))
+                                      .split(QDir::listSeparator(), Qt::SkipEmptyParts);
+    const QString direct = search(inherited);
+    if (!direct.isEmpty())
+        return direct;
+
+    // 2) the login shell's PATH - consulted only after 1) failed, so users
+    //    whose commands resolve directly are completely unaffected
+    const QString fromShell = search(shellPathDirs());
+    if (!fromShell.isEmpty())
+        return fromShell;
+
+    // 3) the built-in downloaded components
+    return search(builtinRuntimeDirs());
 }
 
 QProcessEnvironment Util::commandEnv()
 {
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    QStringList prefixes;
-    const QString nodeBin = nodeBinDir();
-    const QString gitBin = gitBinDir();
-    if (QFileInfo::exists(nodeBin + QStringLiteral("/node"))
-        || QFileInfo::exists(nodeBin + QStringLiteral("/node.exe")))
-        prefixes << nodeBin;
-    if (QFileInfo::exists(gitBin + QStringLiteral("/git.exe")))
-        prefixes << gitBin;
+    // the shell directories are appended only once they are known (the harvest
+    // itself must never be triggered from here - spawning processes would pay
+    // for it on every call)
+    QStringList prefixes = shellPathDirsIfKnown();
+    prefixes << builtinRuntimeDirs();
     if (!prefixes.isEmpty()) {
-        // Built-in directories are a fallback: appended to PATH so that system
-        // components always win
+        // Everything here is a fallback: appended behind the inherited PATH so
+        // that system components always win, and without duplicating it
         const QString old = env.value(QStringLiteral("PATH"));
-        env.insert(QStringLiteral("PATH"),
-                   old + QDir::listSeparator() + prefixes.join(QDir::listSeparator()));
+        const QStringList seen = old.split(QDir::listSeparator(), Qt::SkipEmptyParts);
+        QStringList fresh;
+        for (const QString &dir : prefixes)
+            if (!seen.contains(dir) && !fresh.contains(dir))
+                fresh << dir;
+        if (!fresh.isEmpty())
+            env.insert(QStringLiteral("PATH"),
+                       old + QDir::listSeparator() + fresh.join(QDir::listSeparator()));
     }
     return env;
 }

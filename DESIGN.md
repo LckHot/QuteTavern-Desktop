@@ -144,6 +144,14 @@ PATH, so system components always win and the built-ins are only a fallback.
 Deleting the runtime directory removes them completely; the system environment
 is never polluted.
 
+**Command resolution order**: inherited environment PATH → login shell PATH →
+built-in components. The login shell (`$SHELL -l -i -c`, 3s timeout, fish gets
+its own syntax) is consulted at most once per session and **only after the
+inherited PATH failed** - desktop launches do not run a login shell, so tools
+installed via Homebrew/nvm or into custom directories would otherwise be
+invisible. Because the extra directories are appended and only fetched on
+demand, users whose commands resolve directly are unaffected.
+
 ## 6. Environment check and component downloads (EnvCheck)
 
 - Detection: `Util::findCommand("node"/"git")` (the same resolution logic that

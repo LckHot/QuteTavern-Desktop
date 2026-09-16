@@ -144,7 +144,12 @@ from running `node server.js` (standalone mode) inside the repository.
 
 ## Runtime requirements
 
-The launcher needs `node` (>= 22) and `git` at runtime. Missing components can
+The launcher needs `node` (>= 22) and `git` at runtime. Commands are resolved
+from the environment the launcher was started with; if that fails, the PATH of
+your login shell is consulted once (so installations set up in shell startup
+files - Homebrew, nvm, custom directories - work even when the launcher is
+started from the desktop menu). Nothing is written to your system, and commands
+that already resolve keep their priority. Missing components can
 be downloaded as portable copies into the launcher's application data directory
 (the latest Node.js release, and MinGit on Windows); they never modify the system
 environment - system components always take priority. On macOS git comes with

@@ -64,11 +64,13 @@ QString runtimeDir();
 QString nodeBinDir();
 // git executable directory of MinGit (Windows)
 QString gitBinDir();
-// Look up a command: the system PATH wins, built-in components are a fallback.
-// Returns an empty string when nothing was found.
+// Look up a command. Resolution order: the PATH the launcher inherited, then
+// (only if that failed) the PATH of the user's login shell, then the built-in
+// downloaded components. Returns an empty string when nothing was found.
 QString findCommand(const QString &name);
-// Environment for all QProcess instances: built-in directories are appended to
-// the system PATH so that system components keep priority.
+// Environment for all QProcess instances: the login shell PATH (once known)
+// and the built-in directories are appended to the inherited PATH, in that
+// order, so that already-resolvable components keep their priority.
 QProcessEnvironment commandEnv();
 // Extract an archive with the system tar (.tar.gz/.zip; bsdtar ships with
 // Windows 10+). With stripComponents > 0 the top-level directory of the archive
