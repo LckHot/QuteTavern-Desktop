@@ -85,8 +85,9 @@ ready-to-run packages:
 | Windows | `QuteTavern-<version>-Setup.exe` (NSIS installer) |
 | macOS | `QuteTavern-<version>-universal.pkg` (Intel + Apple silicon) |
 
-Release packages are built automatically when a `v*` tag is pushed; the same
-workflow also runs on pull requests to verify that all platforms build.
+Packages are built when a `v*` tag is pushed - which also publishes the release
+if every platform passes - and on pull requests, so one release never builds the
+same tree twice. Plain pushes to main do not start a build.
 
 The AppImage carries its own current Qt. The `.deb` and the `.rpm` come from one
 build on Ubuntu 22.04, linked against its Qt 6.2 (the oldest Qt 6 with a complete
