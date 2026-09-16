@@ -24,21 +24,30 @@ int main(int argc, char *argv[])
     QApplication::setDesktopFileName(QStringLiteral("qutetavern.desktop"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/icon.png")));
 
-    // Single instance: an already running instance is asked to raise itself
+    // Single instance: an already running instance is asked to raise itself.
+    // A first instance that is still starting up may not answer within the
+    // first window, so the probe retries once before we assume it is dead.
     const QString key = QStringLiteral("qutetavern-singleton");
-    {
+    for (int attempt = 0; attempt < 2; ++attempt) {
         QLocalSocket probe;
         probe.connectToServer(key);
-        if (probe.waitForConnected(300)) {
+        if (probe.waitForConnected(attempt == 0 ? 300 : 1500)) {
             probe.write("raise\n");
             probe.flush();
             probe.waitForBytesWritten(300);
             return 0;
         }
     }
-    QLocalServer::removeServer(key);
     QLocalServer server;
-    server.listen(key);
+    if (!server.listen(key)) {
+        // Stale socket left behind by a crashed instance: remove it and retry.
+        // This only runs after listen() failed - removing the socket
+        // unconditionally could steal it from a live instance (see above).
+        QLocalServer::removeServer(key);
+        if (!server.listen(key))
+            qWarning("single-instance socket %s is unavailable; starting without it",
+                     qPrintable(key));
+    }
 
     MainWindow w;
 
