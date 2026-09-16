@@ -45,7 +45,8 @@ macOS alike.
 - **Automatic dependency bootstrap**, **attach to an existing instance**,
   **error classification**, **update check** (`fetch --tags`, checkout of the
   latest tag, `npm install`, dirty working tree protection)
-- **Graceful shutdown**: SIGTERM -> up to 5s -> SIGKILL (`taskkill` on Windows)
+- **Graceful shutdown**: SIGTERM -> up to 5s -> SIGKILL; on Windows the backend
+  is hard-killed after the window (console processes have no graceful signal)
 - **Single instance**: starting the app again focuses the existing window
 - **Cross-platform**: Linux / Windows / macOS (paths, file managers and process
   termination are adapted per platform)
@@ -138,14 +139,18 @@ from running `node server.js` (standalone mode) inside the repository.
 
 ## Known platform differences
 
-- Windows: the backend is stopped with `taskkill` (no SIGTERM), so backend
-  statistics may not be flushed
-- macOS: there is no PDEATHSIG equivalent, so force-killing the launcher leaves
-  the backend running
+- Windows: a console process cannot be signalled gracefully, so the backend is
+  hard-killed once the 5 second window expires (backend statistics may not be
+  flushed); leftover foreign instances are stopped with `taskkill /F`
+- Linux: the backend is killed together with a force-killed launcher
+  (`PR_SET_PDEATHSIG` -> SIGTERM); macOS and Windows have no equivalent, so
+  force-killing the launcher leaves the backend running there
 
 ## Runtime requirements
 
-The launcher needs `node` (>= 22) and `git` at runtime. Commands are resolved
+The launcher needs `node` (>= 20, the floor SillyTavern declares in its
+`engines` field; the portable download always fetches the latest release) and
+`git` at runtime. Commands are resolved
 from the environment the launcher was started with; if that fails, the PATH of
 your login shell is consulted once (so installations set up in shell startup
 files - Homebrew, nvm, custom directories - work even when the launcher is

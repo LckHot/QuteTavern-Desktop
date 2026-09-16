@@ -12,6 +12,11 @@
 #include <QRegularExpression>
 #include <QThread>
 
+#ifdef Q_OS_LINUX
+#include <csignal>
+#include <sys/prctl.h>
+#endif
+
 static constexpr int kStartTimeoutMs = 90'000;
 static constexpr int kKillTimeoutMs = 5'000;
 static constexpr int kNpmTimeoutMs = 10 * 60'000;
@@ -200,7 +205,7 @@ void Backend::startNpmInstall()
     if (npm.isEmpty()) {
         m_npm->deleteLater();
         m_npm = nullptr;
-        setError(QStringLiteral("npm executable not found. Please make sure Node.js (>= 22) "
+        setError(QStringLiteral("npm executable not found. Please make sure Node.js (>= 20) "
                                 "is installed and on PATH."),
                  true);
         return;
@@ -307,7 +312,7 @@ void Backend::spawnNode()
     // built-in components we append to the child environment.
     const QString node = Util::findCommand(QStringLiteral("node"));
     if (node.isEmpty()) {
-        setError(QStringLiteral("node executable not found. Please make sure Node.js (>= 22) "
+        setError(QStringLiteral("node executable not found. Please make sure Node.js (>= 20) "
                                 "is installed and on PATH."),
                  false);
         return;
@@ -330,6 +335,14 @@ void Backend::spawnNode()
     connect(m_proc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
             this, &Backend::onProcFinished);
     connect(m_proc, &QProcess::errorOccurred, this, &Backend::onProcError);
+
+    // Tie the backend's life to the launcher: PR_SET_PDEATHSIG makes the kernel
+    // SIGTERM the child when this process dies - including a SIGKILL, where no
+    // cleanup handler runs and the child would otherwise be orphaned. macOS and
+    // Windows have no equivalent here (see the README platform differences).
+#ifdef Q_OS_LINUX
+    m_proc->setChildProcessModifier([] { ::prctl(PR_SET_PDEATHSIG, SIGTERM); });
+#endif
 
     // A failed start (FailedToStart) is reported asynchronously through
     // errorOccurred (see onProcError); checking error() right here is not reliable
@@ -424,7 +437,7 @@ void Backend::onProcError(QProcess::ProcessError e)
     }
     if (m_status != Status::Starting)
         return;
-    setError(QStringLiteral("node executable not found. Please make sure Node.js (>= 22) "
+    setError(QStringLiteral("node executable not found. Please make sure Node.js (>= 20) "
                             "is installed and on PATH."),
              false);
 }

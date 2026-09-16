@@ -130,7 +130,7 @@ public:
             m_dlBtn->setEnabled(false);
             m_status->setText(QStringLiteral(
                 "There is no official Node.js binary for this CPU architecture (%1).\n"
-                "Please quit and install Node.js (>= 22) and git manually, "
+                "Please quit and install Node.js (>= 20) and git manually, "
                 "then start the app again.")
                 .arg(cpu));
         }
@@ -262,7 +262,7 @@ void EnvDialog::fetchNodeVersion()
                                m_status->setText(QStringLiteral(
                                    "The extracted archive does not contain a node executable "
                                    "(unexpected layout).\n"
-                                   "You can quit and install Node.js (>= 22) manually."));
+                                   "You can quit and install Node.js (>= 20) manually."));
                                m_exitBtn->setText(QStringLiteral("Close"));
                                m_dlBtn->setEnabled(true);
                                return;
