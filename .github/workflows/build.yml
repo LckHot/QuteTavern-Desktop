@@ -1,7 +1,9 @@
 name: Build packages
 
-# Builds the three platform packages on every push / pull request and attaches
-# them to a GitHub release when a v* tag is pushed.
+# Builds every platform package and attaches them to a GitHub release when a v*
+# tag is pushed. Pull requests are built as well, so changes get verified before
+# they land; plain pushes to main do not trigger anything, otherwise pushing a
+# commit and tagging it in one go would build the same tree twice.
 #
 # The packages are only considered good when the verification steps below pass:
 # each platform asserts that the Qt WebEngine runtime is complete and that the
@@ -9,10 +11,14 @@ name: Build packages
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+
+# Superseded pull request builds are cancelled, release builds never are.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Official Qt binaries (same version everywhere). 6.11+ is not usable yet:
