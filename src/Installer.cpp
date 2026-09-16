@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Installer.h"
 
+#include "Updater.h"
 #include "Util.h"
 
 #include <QDir>
-#include <QProcess>
 
 namespace Installer {
 
@@ -41,19 +41,10 @@ std::optional<QString> install(const QString &targetParent,
         return std::nullopt;
     }
 
-    // 2. Check out the latest tag
+    // 2. Check out the latest tag - the same policy as the update check: only
+    //    plain numeric version tags count, pre-releases are skipped
     onPhase(QStringLiteral("Checking out the latest release tag..."));
-    QProcess tagProc;
-    tagProc.setWorkingDirectory(dir);
-    tagProc.setProcessEnvironment(Util::commandEnv());
-    // absolute path: QProcess resolves bare program names through the parent's
-    // PATH only (see Util::findCommand)
-    const QString git = Util::findCommand(QStringLiteral("git"));
-    tagProc.start(git.isEmpty() ? QStringLiteral("git") : git,
-                  {"tag", "--list", "--sort=-v:refname"});
-    tagProc.waitForFinished(10'000);
-    const QString latest =
-        QString::fromUtf8(tagProc.readAllStandardOutput()).section('\n', 0, 0).trimmed();
+    const QString latest = Updater::latestVersionTag(dir);
     if (latest.isEmpty()) {
         if (err)
             *err = QStringLiteral("The repository has no version tags.");

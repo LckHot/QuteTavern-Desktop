@@ -15,6 +15,16 @@ struct CheckResult {
     QString error;
 };
 
+// Newest plain-numeric version tag of a `git tag --list --sort=-v:refname`
+// listing (pre-releases and other special tags are skipped); empty when
+// nothing matches. Shared by the update check and the installer so both apply
+// the same policy; exposed for unit tests.
+QString pickLatestVersionTag(const QStringList &tagLines);
+
+// Latest plain-numeric version tag of the checkout in stRoot, empty when the
+// repository has none. Blocking; must run on a worker thread.
+QString latestVersionTag(const QString &stRoot);
+
 // Check for updates (git fetch --tags). Blocking; must run on a worker thread.
 CheckResult check(const QString &stRoot, const std::function<void(const QString &)> &log);
 

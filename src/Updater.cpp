@@ -39,6 +39,25 @@ Captured run(const QString &prog, const QStringList &args, const QString &workDi
 
 } // namespace
 
+QString pickLatestVersionTag(const QStringList &tagLines)
+{
+    for (const QString &t : tagLines) {
+        const QString v = t.trimmed();
+        if (versionTagRe().match(v).hasMatch())
+            return v;
+    }
+    return QString();
+}
+
+QString latestVersionTag(const QString &stRoot)
+{
+    const Captured tags = run(QStringLiteral("git"),
+                              {QStringLiteral("tag"), QStringLiteral("--list"),
+                               QStringLiteral("--sort=-v:refname")},
+                              stRoot, 10'000);
+    return pickLatestVersionTag(tags.out.split('\n', Qt::SkipEmptyParts));
+}
+
 CheckResult check(const QString &stRoot, const std::function<void(const QString &)> &log)
 {
     CheckResult r;
@@ -59,13 +78,7 @@ CheckResult check(const QString &stRoot, const std::function<void(const QString 
 
     const Captured tags = run("git", {"tag", "--list", "--sort=-v:refname"}, stRoot, 10'000);
     // Take the first valid version tag in sort order (skipping pre-releases etc.)
-    for (const QString &t : tags.out.split('\n', Qt::SkipEmptyParts)) {
-        const QString v = t.trimmed();
-        if (versionTagRe().match(v).hasMatch()) {
-            r.latest = v;
-            break;
-        }
-    }
+    r.latest = pickLatestVersionTag(tags.out.split('\n', Qt::SkipEmptyParts));
 
     Captured cur = run("git", {"describe", "--tags", "--exact-match"}, stRoot, 10'000);
     if (!cur.code || *cur.code != 0 || cur.out.trimmed().isEmpty())

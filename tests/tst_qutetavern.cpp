@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include "Updater.h"
 #include "Util.h"
 
 namespace {
@@ -43,6 +44,9 @@ private slots:
 
     void validateRoot_acceptsCheckout();
     void validateRoot_rejectsNonSillyTavern();
+
+    void pickLatestVersionTag_skipsPreReleases();
+    void pickLatestVersionTag_emptyWhenOnlySpecialTags();
 };
 
 void TestQuteTavern::ansiStrip_removesColorSequences()
@@ -141,6 +145,23 @@ void TestQuteTavern::validateRoot_rejectsNonSillyTavern()
     const auto rc = Util::validateRoot(tmp.path());
     QVERIFY(!rc.ok);
     QVERIFY(!rc.error.isEmpty());
+}
+
+void TestQuteTavern::pickLatestVersionTag_skipsPreReleases()
+{
+    const QStringList tags{
+        QStringLiteral("1.20.0-rc1"), // first by -v:refname, must be skipped
+        QStringLiteral("1.19.1"),
+        QStringLiteral("1.19.0"),
+    };
+    QCOMPARE(Updater::pickLatestVersionTag(tags), QStringLiteral("1.19.1"));
+}
+
+void TestQuteTavern::pickLatestVersionTag_emptyWhenOnlySpecialTags()
+{
+    // Plain numeric tags are the only accepted form ("v2.0.0" is not one)
+    const QStringList tags{QStringLiteral("release"), QStringLiteral("v2.0.0")};
+    QVERIFY(Updater::pickLatestVersionTag(tags).isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestQuteTavern)
