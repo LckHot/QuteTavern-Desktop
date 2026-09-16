@@ -21,9 +21,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Official Qt binaries (same version everywhere). 6.11+ is not usable yet:
-  # its Windows repository layout is not understood by aqt 3.3.0.
+  # Qt for the AppImage and the Windows/macOS packages: the current release.
   QT_VERSION: '6.10.3'
+  # Qt for the .deb and the .rpm builds: the oldest Qt 6 release with a
+  # complete WebEngine, so the packages run on the widest range of
+  # distributions that provide Qt 6.2 or newer themselves.
+  QT_VERSION_FLOOR: '6.2.4'
 
 jobs:
   linux-appimage:
@@ -457,17 +460,28 @@ jobs:
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "version: $VERSION"
 
-      - name: Install the distribution's Qt and rpmbuild
+- name: Install Qt (official binaries, 6.2.4)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION_FLOOR }}
+          modules: 'qtwebengine qtwebchannel qtpositioning qtserialport'
+          cache: true
+
+      - name: Install build prerequisites
         run: |
           sudo apt-get update
-          # A single build serves both packages: it is linked against the Qt of
-          # Ubuntu 22.04 (Qt 6.2, glibc 2.35), the oldest environment that still
-          # provides a complete Qt WebEngine, so the .deb and the .rpm depend on
-          # the distribution's Qt instead of carrying their own copy.
-          PACKAGES="build-essential cmake rpm libgl1-mesa-dev
-            qt6-base-dev qt6-base-dev-tools qt6-declarative-dev qt6-positioning-dev
-            qt6-webchannel-dev qt6-webengine-dev qt6-webengine-dev-tools
-            libqt6opengl6-dev libqt6webenginecore6-bin qt6-qpa-plugins"
+          # - the OpenGL/fontconfig/xkbcommon headers that Qt's CMake
+          #   configuration looks for
+          # - the distribution's Qt *runtime* packages: dpkg-shlibdeps reads
+          #   their shlibs data to turn the SONAMEs the binary links into
+          #   Debian package names for the Depends field
+          PACKAGES="build-essential cmake rpm
+            libgl1-mesa-dev libfontconfig1-dev libfreetype6-dev
+            libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libx11-xcb-dev libxcb1-dev
+            libqt6core6 libqt6gui6 libqt6widgets6 libqt6network6 libqt6opengl6
+            libqt6webenginewidgets6 libqt6webenginecore6 libqt6webenginecore6-bin
+            libqt6webchannel6 libqt6positioning6 qt6-qpa-plugins
+            desktop-file-utils file wget"
           INSTALL=""
           for p in $PACKAGES; do
             if apt-cache show "$p" >/dev/null 2>&1; then
