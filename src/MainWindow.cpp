@@ -453,7 +453,15 @@ void MainWindow::onForeignInstance(int port)
 void MainWindow::openStWindow(const QString &url)
 {
     if (m_stWindow) {
-        m_stWindow->showNormal();
+        // A page fullscreen window must not be forced back to normal: the page
+        // still holds a fullscreen element and StWindow keeps the two states in
+        // sync, so only bring the window back to the front.
+        if (m_stWindow->isFullScreen()) {
+            if (m_stWindow->isMinimized())
+                m_stWindow->showFullScreen();
+        } else {
+            m_stWindow->showNormal();
+        }
         m_stWindow->raise();
         m_stWindow->activateWindow();
         return;
@@ -788,7 +796,7 @@ void MainWindow::openInstallDialog()
             QMetaObject::invokeMethod(qApp, [self, dir, err, phaseGuard] {
                 if (phaseGuard)
                     phaseGuard->setText(dir.has_value()
-                                            ? QStringLiteral("Installation finished")
+                                            ? QStringLiteral("✅ Installation finished")
                                             : QStringLiteral("Installation failed"));
                 if (!self)
                     return;
@@ -799,9 +807,10 @@ void MainWindow::openInstallDialog()
                     self->refreshInfo();
                     self->applyState();
                     QMessageBox::information(
-                        self, QStringLiteral("Installation finished"),
-                        QStringLiteral("Installed and bound: %1\nYou can now press \"Start "
-                                       "SillyTavern\".").arg(*dir));
+                        self, QStringLiteral("Installation successful"),
+                        QStringLiteral("✅ SillyTavern was installed successfully.\n\n"
+                                       "Location: %1\n\n"
+                                       "You can now press \"▶  Start SillyTavern\".").arg(*dir));
                 } else {
                     QMessageBox::warning(self, QStringLiteral("Installation failed"), err);
                 }

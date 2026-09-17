@@ -59,6 +59,12 @@ When the backend crashes the ST window closes automatically, and the error plus
 the log are presented in the management window - **backend running ⟺ ST window
 exists** (unless the user closed it), no hidden state.
 
+The page's Fullscreen API is enabled and driven by StWindow: entering fullscreen
+makes the window fullscreen, Escape exits it like a browser, leaving restores
+the window state from before (maximized or normal), and a fullscreen geometry
+is never written back to Settings. "Open ST window" raises a fullscreen window
+instead of forcing it back to normal, so window and page state stay in sync.
+
 ## 3. Module design
 
 | File | Responsibility |
