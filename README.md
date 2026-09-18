@@ -143,8 +143,9 @@ from running `node server.js` (standalone mode) inside the repository.
   hard-killed immediately (backend statistics may not be flushed); leftover
   foreign instances are stopped with `taskkill /F`
 - Linux: the backend is killed together with a force-killed launcher
-  (`PR_SET_PDEATHSIG` -> SIGTERM); macOS and Windows have no equivalent, so
-  force-killing the launcher leaves the backend running there
+  (`PR_SET_PDEATHSIG` -> SIGTERM); Windows uses a Job Object
+  (`KILL_ON_JOB_CLOSE`). macOS has no equivalent, so force-killing the
+  launcher leaves the backend running there
 
 ## Runtime requirements
 

@@ -100,4 +100,7 @@ private:
     QByteArray m_probeBuf;// probe reply buffer (accumulated until the first line break)
     QStringList m_tail;   // recent log lines of this run (used to classify exits)
     std::atomic_bool m_nodeAlive{false};
+#ifdef Q_OS_WIN
+    void *m_job = nullptr; // HANDLE; Job Object with KILL_ON_JOB_CLOSE
+#endif
 };

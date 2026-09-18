@@ -16,11 +16,42 @@
 #include <csignal>
 #include <sys/prctl.h>
 #endif
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 static constexpr int kStartTimeoutMs = 90'000;
 static constexpr int kKillTimeoutMs = 5'000;
 static constexpr int kNpmTimeoutMs = 10 * 60'000;
 static constexpr qsizetype kMaxLineBufBytes = 1024 * 1024; // guard against endless lines
+
+#ifdef Q_OS_WIN
+static void *createKillOnCloseJob()
+{
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (!job)
+        return nullptr;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = {};
+    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
+        CloseHandle(job);
+        return nullptr;
+    }
+    return job;
+}
+
+static bool assignPidToJob(void *job, qint64 pid)
+{
+    if (!job || pid <= 0)
+        return false;
+    HANDLE process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, DWORD(pid));
+    if (!process)
+        return false;
+    const BOOL ok = AssignProcessToJobObject(static_cast<HANDLE>(job), process);
+    CloseHandle(process);
+    return ok;
+}
+#endif
 
 Backend::Backend(QObject *parent)
     : QObject(parent)
@@ -32,6 +63,9 @@ Backend::Backend(QObject *parent)
     connect(&m_killTimer, &QTimer::timeout, this, &Backend::onKillTimeout);
     connect(&m_npmTimer, &QTimer::timeout, this, &Backend::onNpmTimeout);
     m_probeTimer.setSingleShot(true);
+#ifdef Q_OS_WIN
+    m_job = createKillOnCloseJob();
+#endif
 }
 
 Backend::~Backend()
@@ -40,6 +74,15 @@ Backend::~Backend()
     // thread keeps running after this object is gone
     if (m_takeoverThread && m_takeoverThread->isRunning())
         m_takeoverThread->wait(4000);
+#ifdef Q_OS_WIN
+    // Closing the job kills any remaining child (KILL_ON_JOB_CLOSE). Destructors
+    // do not run when the launcher is force-killed; the kernel still closes the
+    // handle, which is the Windows counterpart of PR_SET_PDEATHSIG.
+    if (m_job) {
+        CloseHandle(static_cast<HANDLE>(m_job));
+        m_job = nullptr;
+    }
+#endif
 }
 
 QString Backend::stRoot() const
@@ -335,15 +378,21 @@ void Backend::spawnNode()
     // The PID is only valid once the child really started
     connect(m_proc, &QProcess::started, this, [this] {
         auto *p = qobject_cast<QProcess *>(sender());
-        if (p && p == m_proc)
-            log(QStringLiteral("Backend started (node server.js --global, PID %1)")
-                    .arg(QString::number(p->processId())));
+        if (!p || p != m_proc)
+            return;
+#ifdef Q_OS_WIN
+        if (m_job && !assignPidToJob(m_job, p->processId()))
+            log(QStringLiteral("Could not assign the backend to the launcher job object "
+                               "(a force-killed launcher may leave it running)"));
+#endif
+        log(QStringLiteral("Backend started (node server.js --global, PID %1)")
+                .arg(QString::number(p->processId())));
     });
 
-    // Tie the backend's life to the launcher: PR_SET_PDEATHSIG makes the kernel
-    // SIGTERM the child when this process dies - including a SIGKILL, where no
-    // cleanup handler runs and the child would otherwise be orphaned. macOS and
-    // Windows have no equivalent here (see the README platform differences).
+    // Tie the backend's life to the launcher. Linux: PR_SET_PDEATHSIG SIGTERMs
+    // the child when this process dies, including SIGKILL (no cleanup handler).
+    // Windows: the node child is assigned to a Job Object with KILL_ON_JOB_CLOSE
+    // once started() fires. macOS has no equivalent (see README).
 #ifdef Q_OS_LINUX
     m_proc->setChildProcessModifier([] { ::prctl(PR_SET_PDEATHSIG, SIGTERM); });
 #endif

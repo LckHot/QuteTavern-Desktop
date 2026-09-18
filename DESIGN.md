@@ -244,7 +244,7 @@ launcher:
 | Management window / ST window / log / settings | yes | yes | yes |
 | Install a new copy / check for updates | yes | yes (git needs the CLT) | yes |
 | Component download | node yes / git via the distribution | node yes / git via the CLT | node + MinGit yes |
-| Known limitations | - | no PDEATHSIG: force-killing the launcher leaves the backend running | immediate hard kill (no graceful console signal) |
+| Known limitations | - | no PDEATHSIG: force-killing the launcher leaves the backend running | immediate hard kill (no graceful console signal); Job Object kills the backend with a force-killed launcher |
 
 Packages for all three platforms are produced by
 `.github/workflows/build.yml`; the artifact names are listed in the README.
