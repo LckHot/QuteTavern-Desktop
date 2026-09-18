@@ -25,7 +25,7 @@ macOS alike.
 +-----------------------------------------------------------------+
         | 127.0.0.1:8000
         v
-   node server.js --global (QProcess, SIGTERM -> 5s -> SIGKILL)
+   node server.js --global (QProcess, SIGTERM -> 5s -> SIGKILL; Windows: kill immediately)
    data/config -> global data directory (Linux: ~/.local/share/SillyTavern)
 ```
 
@@ -46,7 +46,7 @@ macOS alike.
   **error classification**, **update check** (`fetch --tags`, checkout of the
   latest tag, `npm install`, dirty working tree protection)
 - **Graceful shutdown**: SIGTERM -> up to 5s -> SIGKILL; on Windows the backend
-  is hard-killed after the window (console processes have no graceful signal)
+  is hard-killed immediately (console processes have no graceful signal)
 - **Single instance**: starting the app again focuses the existing window
 - **Cross-platform**: Linux / Windows / macOS (paths, file managers and process
   termination are adapted per platform)
@@ -140,8 +140,8 @@ from running `node server.js` (standalone mode) inside the repository.
 ## Known platform differences
 
 - Windows: a console process cannot be signalled gracefully, so the backend is
-  hard-killed once the 5 second window expires (backend statistics may not be
-  flushed); leftover foreign instances are stopped with `taskkill /F`
+  hard-killed immediately (backend statistics may not be flushed); leftover
+  foreign instances are stopped with `taskkill /F`
 - Linux: the backend is killed together with a force-killed launcher
   (`PR_SET_PDEATHSIG` -> SIGTERM); macOS and Windows have no equivalent, so
   force-killing the launcher leaves the backend running there

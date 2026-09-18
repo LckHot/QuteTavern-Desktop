@@ -14,7 +14,8 @@ class QThread;
 // SillyTavern backend process management (QProcess state machine, everything on
 // the main thread): probe (HTTP) -> foreign instance decided by the UI ->
 // dependency check -> spawn node -> parse the "Go to:" URL -> Running.
-// Graceful stop is SIGTERM -> 5s -> SIGKILL.
+// Graceful stop is SIGTERM -> 5s -> SIGKILL. Windows console processes
+// ignore WM_CLOSE (QProcess::terminate), so the child is killed immediately.
 class Backend : public QObject {
     Q_OBJECT
 

@@ -54,7 +54,7 @@ MainWindow::~MainWindow()
 }
 
 // Window contract (DESIGN section 2): closing the management window stops the
-// backend gracefully (SIGTERM -> 5s -> SIGKILL) and quits the application.
+// backend (SIGTERM -> 5s -> SIGKILL; Windows: kill immediately) and quits.
 // The stop is driven by the main event loop, so the close event is intercepted
 // first and the window closes once the state machine reaches a final state.
 // A 7 second fallback forces the close so the user can always quit.

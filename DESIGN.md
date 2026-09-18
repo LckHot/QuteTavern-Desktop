@@ -53,7 +53,7 @@ platforms (Linux / Windows / macOS).
 | Window | Closing behaviour |
 | --- | --- |
 | ST window | The backend keeps running; "Open ST window" in the management window brings it back |
-| Management window | Stops the backend gracefully (SIGTERM → 5s → SIGKILL) and quits the application |
+| Management window | Stops the backend (SIGTERM → 5s → SIGKILL; Windows: kill immediately) and quits the application |
 
 When the backend crashes the ST window closes automatically, and the error plus
 the log are presented in the management window - **backend running ⟺ ST window
@@ -113,7 +113,8 @@ start()
        └─ exit classification: already in use → port busy; Cannot find module → dependencies
                     missing (can be reinstalled); otherwise → "exit code N, see the log"
 
-stop(): switch to Stopping → terminate() → 5s timer → kill();
+stop(): switch to Stopping → terminate() → 5s timer → kill()
+        (Windows: kill() immediately; console node ignores WM_CLOSE)
         during the npm/probe stage there is no child process, the state goes straight to Stopped
 ```
 
@@ -138,7 +139,7 @@ Design notes:
 | Open a directory | xdg-open | open | explorer |
 | Foreign instance discovery | /proc cmdline scan (+ listening-port cross-check) | pgrep -fl filter | netstat -ano to find the listening PID |
 | Foreign instance termination | SIGTERM→3s→SIGKILL | same | taskkill /F |
-| Graceful backend stop | SIGTERM (SillyTavern has cleanup hooks) | same | hard kill after the 5 s window (console processes cannot be signalled) |
+| Graceful backend stop | SIGTERM (SillyTavern has cleanup hooks) | same | immediate hard kill (console processes cannot be signalled) |
 | Data directory | ~/.local/share/SillyTavern (or $XDG_DATA_HOME) | ~/Library/Application Support/SillyTavern | %LOCALAPPDATA%\SillyTavern\Data |
 | npm invocation | npm | npm | cmd /c npm (batch script) |
 | Archive extraction | tar | tar (bsdtar) | tar (bundled since Windows 10 1803) |
@@ -243,7 +244,7 @@ launcher:
 | Management window / ST window / log / settings | yes | yes | yes |
 | Install a new copy / check for updates | yes | yes (git needs the CLT) | yes |
 | Component download | node yes / git via the distribution | node yes / git via the CLT | node + MinGit yes |
-| Known limitations | - | no PDEATHSIG: force-killing the launcher leaves the backend running | hard kill after the 5 s window (no graceful console signal) |
+| Known limitations | - | no PDEATHSIG: force-killing the launcher leaves the backend running | immediate hard kill (no graceful console signal) |
 
 Packages for all three platforms are produced by
 `.github/workflows/build.yml`; the artifact names are listed in the README.

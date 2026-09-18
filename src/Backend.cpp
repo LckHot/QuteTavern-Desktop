@@ -476,8 +476,15 @@ void Backend::stop()
         m_npm->kill();
     }
     if (m_proc) {
+        // Unix: SIGTERM, then SIGKILL after 5s if SillyTavern's cleanup hooks
+        // have not exited. Windows: terminate() posts WM_CLOSE, which a console
+        // node process never handles, so waiting would always burn the full 5s.
+#ifdef Q_OS_WIN
+        m_proc->kill();
+#else
         m_proc->terminate();
         m_killTimer.start(kKillTimeoutMs);
+#endif
     } else {
         finishStop();
     }
@@ -498,8 +505,12 @@ void Backend::onStartTimeout()
         return;
     log(QStringLiteral("Startup timed out, terminating the backend process..."));
     m_timeoutAbort = true;
+#ifdef Q_OS_WIN
+    m_proc->kill();
+#else
     m_proc->terminate();
     QTimer::singleShot(3000, m_proc, &QProcess::kill);
+#endif
 }
 
 void Backend::onKillTimeout()
