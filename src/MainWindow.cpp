@@ -418,8 +418,7 @@ void MainWindow::applyState()
                   || m_backend->status() == Backend::Status::Error));
     m_openBtn->setEnabled(m_backend->status() == Backend::Status::Running);
     m_stopBtn->setEnabled(m_backend->status() == Backend::Status::Running
-                          || m_backend->status() == Backend::Status::Starting
-                          || m_backend->status() == Backend::Status::Stopping);
+                          || m_backend->status() == Backend::Status::Starting);
 }
 
 void MainWindow::onForeignInstance(int port)

@@ -465,7 +465,8 @@ void Backend::classifyExit(int code)
 
 void Backend::stop()
 {
-    if (m_status == Status::Stopped || m_status == Status::Error)
+    if (m_status == Status::Stopped || m_status == Status::Error
+        || m_status == Status::Stopping)
         return;
     m_stopping = true;
     setStatus(Status::Stopping);
