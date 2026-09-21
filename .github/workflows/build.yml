@@ -650,6 +650,12 @@ jobs:
             echo "$DEPENDS" | grep -q "$p" \
               || { echo "::error::$p is not declared in Depends"; exit 1; }
           done
+          # the GL stack is linked from the system, not from Qt: on most systems
+          # libqt6gui6 pulls these in, but a package declares what it needs
+          for p in libopengl0 libegl1 libglx0; do
+            echo "$DEPENDS" | grep -q "$p" \
+              || { echo "::error::$p is not declared in Depends"; exit 1; }
+          done
           if echo "$DEPENDS" | grep -q "libqt6widgets6"; then
             echo "::error::the package still depends on Qt Widgets"
             exit 1
