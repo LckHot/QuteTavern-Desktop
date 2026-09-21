@@ -7,7 +7,7 @@ texts can be obtained from the projects linked below.
 The launcher itself is licensed under the GNU Affero General Public License
 v3.0 (see [LICENSE](LICENSE)).
 
-## Qt 6 (Widgets, Network, WebEngine)
+## Qt 6 (Core, Gui, Network, Qml, Quick, Quick Controls 2, WebEngine)
 
 - Ships with: all packages (the Linux AppImage, the Windows installer and the
   macOS package contain the Qt libraries, the WebEngine helper process, its

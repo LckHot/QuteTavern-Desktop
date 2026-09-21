@@ -648,17 +648,29 @@ jobs:
           echo "Depends: $DEPENDS"
           # the QML UI links Qt Quick / WebEngine Quick, and the QML modules are
           # loaded at runtime, so they cannot be inferred from the shared libraries
-          for p in libqt6quick6 libqt6qml6 libqt6quickcontrols2-6 libqt6webenginequick6 \
-                   qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
-                   qml6-module-qtquick-window qml6-module-qtwebengine; do
+          for p in libqt6quick6 libqt6qml6 libqt6quickcontrols2-6 libqt6webenginequick6; do
             echo "$DEPENDS" | grep -q "$p" \
               || { echo "::error::$p is not declared in Depends"; exit 1; }
+          done
+          # Every Qt module the UI imports needs its corresponding qml6-module-*
+          # package, and nothing else can be relied on to pull it in (Debian's
+          # qml6-module-qtquick-controls, for instance, does not depend on
+          # qtquick-dialogs). The list is therefore derived from the import
+          # statements themselves, so adding an import without declaring its
+          # package fails here.
+          IMPORTS=$(grep -h '^import ' qml/*.qml | awk '{print $2}' | grep -vx QuteTavern | sort -u)
+          echo "QML imports: $(echo $IMPORTS)"
+          echo "$IMPORTS" > qml-imports.txt
+          for m in $IMPORTS; do
+            p="qml6-module-$(echo "$m" | tr 'A-Z.' 'a-z-')"
+            echo "$DEPENDS" | grep -q "$p" \
+              || { echo "::error::$m is imported by the UI but $p is not in Depends"; exit 1; }
           done
           if echo "$DEPENDS" | grep -q "libqt6widgets6"; then
             echo "::error::the package still depends on Qt Widgets"
             exit 1
           fi
-          echo "Depends declares the Qt Quick, QML module and WebEngine Quick packages"
+          echo "Depends declares the Qt libraries and the QML modules the UI imports"
 
       - name: Install and start the .deb in a clean Debian container
         run: |
@@ -677,10 +689,13 @@ jobs:
             QMLROOT=$(find /usr/lib -maxdepth 4 -type d -name QtWebEngine -path "*qml*" | head -1)
             [ -n "$QMLROOT" ] || { echo "the QtWebEngine QML module is missing"; exit 1; }
             QMLBASE=$(dirname "$QMLROOT")
-            for m in QtQuick/Controls QtQuick/Controls/Basic QtQuick/Dialogs \
-                     QtQuick/Window QtQuick/Layouts QtQml; do
-              [ -d "$QMLBASE/$m" ] || { echo "the QML module $m is missing"; exit 1; }
-            done
+            # every module the UI imports, derived from the import statements in
+            # the previous step: apt has to have brought all of them in
+            while read -r m; do
+              d=$(echo "$m" | tr '.' '/')
+              test -f "$QMLBASE/$d/qmldir" || {
+                echo "the QML module $m is missing ($QMLBASE/$d/qmldir)"; exit 1; }
+            done < /src/qml-imports.txt
             echo "QML modules: $QMLBASE"
             set +e
             QT_QPA_PLATFORM=offscreen timeout 12 qutetavern >run.log 2>&1
@@ -726,12 +741,13 @@ jobs:
             test -e /usr/lib64/qt6/libexec/QtWebEngineProcess || {
               echo "the Qt WebEngine runtime is missing"; exit 1; }
             # ... and so must the QML modules, which the QML engine loads at
-            # runtime: they are invisible to the shared library dependencies
-            for m in QtQuick/Controls QtQuick/Controls/Basic QtQuick/Dialogs \
-                     QtQuick/Window QtQuick/Layouts QtQml QtWebEngine; do
-              test -d "/usr/lib64/qt6/qml/$m" || {
+            # runtime: they are invisible to the shared library dependencies. The
+            # list comes from the import statements, derived in the .deb step.
+            while read -r m; do
+              d=$(echo "$m" | tr '.' '/')
+              test -f "/usr/lib64/qt6/qml/$d/qmldir" || {
                 echo "the QML module $m is missing"; exit 1; }
-            done
+            done < /src/qml-imports.txt
             echo "the QML modules are installed"
             set +e
             QT_QPA_PLATFORM=offscreen timeout 12 qutetavern >run.log 2>&1

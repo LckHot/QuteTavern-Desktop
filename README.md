@@ -105,32 +105,19 @@ and declare the distribution's Qt libraries **and QML modules** as dependencies
 instead of bundling them - so Qt updates arrive through the system package
 manager.
 
-The macOS package is one universal `.pkg`. A single build passes both `arm64`
-and `x86_64` to the compiler, so splitting it into two downloads would buy
-nothing but a second job, a second artifact and a "which Mac do I have?" choice
-for the user. CI asserts that the application carries both slices, which is what
-the "Intel and Apple silicon" claim in this table rests on; the arm64 slice is
-compiled natively on the arm64 runner. The only cost of the universal build is
-size (~250 MB instead of ~130 MB); if that ever outweighs running on Intel Macs,
-dropping `x86_64` is a one-line change to the build flags.
+## Runtime requirements
 
-## Distribution support
-
-| Package | Requirements | Runs on |
+| Package | Recommended system | Qt and glibc |
 | --- | --- | --- |
-| `.deb` | Qt 6.5+, glibc 2.35+ | Debian 13 and newer, Ubuntu 25.04 and newer, and other distributions providing Qt 6.5+ |
-| `.rpm` | Qt 6.5+, glibc 2.35+ | Fedora 40 and newer, RHEL 10 and newer, and other RPM distributions providing Qt 6.5+ |
-| `.AppImage` | glibc 2.35+, no system Qt | any distribution meeting the glibc floor (Fedora 36+, Ubuntu 22.04+, Debian 12+, …) |
-| Windows installer | - | Windows 10 1803 or newer |
-| macOS package | - | macOS 12 or newer, Intel and Apple silicon |
+| `.deb` | Debian 13 or newer, Ubuntu 25.04 or newer | the system's Qt 6.5+, glibc 2.35+ |
+| `.rpm` | Fedora 40 or newer, RHEL 10 or newer | the system's Qt 6.5+, glibc 2.35+ |
+| `.AppImage` | any x86_64 Linux | its own Qt, glibc 2.35+ |
+| Windows installer | Windows 10 1803 or newer | bundled |
+| macOS package | macOS 12 or newer, Intel and Apple silicon | bundled |
 
-Those floors are not assumptions: CI builds the packages against the official
-Qt 6.5 binaries and then installs, starts and removes the `.deb` inside a Debian
-13 container and the `.rpm` inside a Fedora container, so the oldest supported
-configuration is tested end to end. Distributions whose Qt is older than 6.5
-(Ubuntu 22.04 and 24.04, Debian 12) are served by the AppImage, which brings its
-own Qt. RHEL 9 is deliberately not covered - it ships glibc 2.34, below what the
-build requires.
+If the system's Qt is older than 6.5 - as on Ubuntu 22.04 and 24.04 or Debian 12
+- use the AppImage: it carries its own Qt and QML runtime and only asks the
+system for glibc 2.35 or newer.
 
 ## Window semantics
 
