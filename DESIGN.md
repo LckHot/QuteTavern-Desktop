@@ -1,6 +1,6 @@
 # QuteTavern Design Document
 
-Version: v1.1.0 | [Back to README](README.md)
+Version: v2.0.0 | [Back to README](README.md)
 
 This document records the overall design, the responsibilities of each module and
 the key decisions with their rationale, for future maintenance.
