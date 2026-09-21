@@ -35,6 +35,14 @@ qt_add_executable(qutetavern
 # must be flagged *before* the module is declared.
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
+# The module must live at :/qt/qml/QuteTavern so that the QML engine finds it in
+# its default resource import path; with the QTP0001 old behavior the qmldir
+# ends up at :/QuteTavern and the engine only finds it through the build tree's
+# generated QuteTavern/qmldir directory - which no installed package ships, so
+# the packaged application would fail to start ("Module QuteTavern contains no
+# type named Main"). Qt 6.5+ (see qt_policy and qt-cmake-policy-qtp0001).
+qt_policy(SET QTP0001 NEW)
+
 qt_add_qml_module(qutetavern
     URI QuteTavern
     VERSION 1.0

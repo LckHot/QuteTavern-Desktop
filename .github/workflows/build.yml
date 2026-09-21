@@ -21,8 +21,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Qt for the AppImage and the Windows/macOS packages: the current release.
-  QT_VERSION: '6.10.3'
+  # Qt for the AppImage and the Windows/macOS packages. These bundles carry
+  # their own Qt, so nothing constrains the choice except being current: the
+  # newest stable patch release also carries the newest Chromium security fixes
+  # (the AppImage is the way an older distribution gets a working QML UI).
+  QT_VERSION: '6.11.2'
   # Qt for the .deb and the .rpm builds: the floor the QML UI needs. Qt 6.5 is
   # the minimum because the UI layer uses QQmlApplicationEngine::loadFromModule
   # (added in 6.5) and the native folder dialogs (added in 6.3). Distributions
@@ -184,7 +187,8 @@ jobs:
             find AppDir -maxdepth 3 -type d
             exit 1
           }
-          for m in QtQuick/Controls QtQuick/Window QtQuick/Layouts QtQml QtWebEngine; do
+          for m in QtQuick QtQuick/Controls QtQuick/Controls/Basic QtQuick/Dialogs \
+                   QtQuick/Layouts QtQuick/Templates QtQuick/Window QtQml QtWebEngine; do
             if [ ! -d "$QMLROOT/$m" ]; then
               echo "::error::the QML module $m is missing from the bundle"
               find "$QMLROOT" -maxdepth 2 -type d | head -40
@@ -275,6 +279,8 @@ jobs:
             "dist\resources\icudtl.dat",
             "dist\translations\qtwebengine_locales",
             "dist\qml\QtQuick\Controls",
+            "dist\qml\QtQuick\Controls\Basic",
+            "dist\qml\QtQuick\Dialogs",
             "dist\qml\QtQuick\Window",
             "dist\qml\QtWebEngine"
           )
@@ -420,7 +426,7 @@ jobs:
             find "$APP/Contents" -maxdepth 3 -type d | head -30
             exit 1
           }
-          for m in QtQuick/Controls QtQuick/Window QtQml; do
+          for m in QtQuick/Controls QtQuick/Controls/Basic QtQuick/Dialogs QtQuick/Window QtQml; do
             [ -d "$(dirname "$QMLDIR")/$m" ] || {
               echo "::error::the QML module $m is missing from the bundle"; exit 1; }
           done
@@ -583,7 +589,8 @@ jobs:
             QMLROOT=$(find /usr/lib -maxdepth 4 -type d -name QtWebEngine -path "*qml*" | head -1)
             [ -n "$QMLROOT" ] || { echo "the QtWebEngine QML module is missing"; exit 1; }
             QMLBASE=$(dirname "$QMLROOT")
-            for m in QtQuick/Controls QtQuick/Window QtQuick/Layouts QtQml; do
+            for m in QtQuick/Controls QtQuick/Controls/Basic QtQuick/Dialogs \
+                     QtQuick/Window QtQuick/Layouts QtQml; do
               [ -d "$QMLBASE/$m" ] || { echo "the QML module $m is missing"; exit 1; }
             done
             echo "QML modules: $QMLBASE"
@@ -623,7 +630,8 @@ jobs:
               echo "the Qt WebEngine runtime is missing"; exit 1; }
             # ... and so must the QML modules, which the QML engine loads at
             # runtime: they are invisible to the shared library dependencies
-            for m in QtQuick/Controls QtQuick/Window QtQuick/Layouts QtQml QtWebEngine; do
+            for m in QtQuick/Controls QtQuick/Controls/Basic QtQuick/Dialogs \
+                     QtQuick/Window QtQuick/Layouts QtQml QtWebEngine; do
               test -d "/usr/lib64/qt6/qml/$m" || {
                 echo "the QML module $m is missing"; exit 1; }
             done
