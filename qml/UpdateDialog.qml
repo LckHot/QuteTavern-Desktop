@@ -12,7 +12,8 @@ Dialog {
 
     title: qsTr("Check for updates")
     modal: true
-    width: 580
+    width: Theme.dialogWidth
+    height: Math.min(implicitHeight, parent ? parent.height - 2 * Theme.dialogMargin : implicitHeight)
     anchors.centerIn: parent
 
     onOpened: App.checkUpdates()
@@ -37,25 +38,31 @@ Dialog {
         }
     }
 
-    footer: RowLayout {
-        spacing: 8
+    footer: Item {
+        implicitHeight: footerRow.implicitHeight + 2 * Theme.dialogMargin
+        RowLayout {
+            id: footerRow
+            anchors.fill: parent
+            anchors.margins: Theme.dialogMargin
+            spacing: 8
 
-        Button {
-            text: qsTr("Check again")
-            enabled: !App.updateRunning
-            onClicked: App.checkUpdates()
-        }
-        Button {
-            text: qsTr("Update")
-            enabled: App.updateCanUpdate && !App.updateRunning
-            onClicked: App.performUpdate()
-        }
-        Item {
-            Layout.fillWidth: true
-        }
-        Button {
-            text: qsTr("Close")
-            onClicked: dialog.close()
+            Button {
+                text: qsTr("Check again")
+                enabled: !App.updateRunning
+                onClicked: App.checkUpdates()
+            }
+            Button {
+                text: qsTr("Update")
+                enabled: App.updateCanUpdate && !App.updateRunning
+                onClicked: App.performUpdate()
+            }
+            Item {
+                Layout.fillWidth: true
+            }
+            Button {
+                text: qsTr("Close")
+                onClicked: dialog.close()
+            }
         }
     }
 }

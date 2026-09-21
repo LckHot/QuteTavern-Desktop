@@ -12,7 +12,8 @@ Dialog {
 
     title: App.messageTitle
     modal: true
-    width: 480
+    width: Theme.dialogWidth
+    height: Math.min(implicitHeight, parent ? parent.height - 2 * Theme.dialogMargin : implicitHeight)
     anchors.centerIn: parent
     visible: App.messageVisible
 
@@ -22,13 +23,20 @@ Dialog {
         color: App.messageWarning ? Theme.err : Theme.ok
     }
 
-    footer: RowLayout {
-        Item {
-            Layout.fillWidth: true
-        }
-        Button {
-            text: qsTr("OK")
-            onClicked: App.dismissMessage()
+    footer: Item {
+        implicitHeight: footerRow.implicitHeight + 2 * Theme.dialogMargin
+        RowLayout {
+            id: footerRow
+            anchors.fill: parent
+            anchors.margins: Theme.dialogMargin
+
+            Item {
+                Layout.fillWidth: true
+            }
+            Button {
+                text: qsTr("OK")
+                onClicked: App.dismissMessage()
+            }
         }
     }
 

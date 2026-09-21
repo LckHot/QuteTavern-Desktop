@@ -13,7 +13,8 @@ Dialog {
 
     title: qsTr("Preferences")
     modal: true
-    width: 520
+    width: Theme.dialogWidth
+    height: Math.min(implicitHeight, parent ? parent.height - 2 * Theme.dialogMargin : implicitHeight)
     anchors.centerIn: parent
 
     property var check: ({
@@ -94,27 +95,33 @@ Dialog {
         }
     }
 
-    footer: RowLayout {
-        spacing: 8
+    footer: Item {
+        implicitHeight: footerRow.implicitHeight + 2 * Theme.dialogMargin
+        RowLayout {
+            id: footerRow
+            anchors.fill: parent
+            anchors.margins: Theme.dialogMargin
+            spacing: 8
 
-        Item {
-            Layout.fillWidth: true
-        }
-        Button {
-            text: qsTr("Cancel")
-            onClicked: dialog.close()
-        }
-        Button {
-            text: qsTr("Save")
-            enabled: dialog.check.ok
-            onClicked: {
-                const error = App.saveSettings(rootField.text, argsField.text,
-                                               maxCheck.checked)
-                if (error.length > 0) {
-                    dialog.saveError = error
-                    return
+            Item {
+                Layout.fillWidth: true
+            }
+            Button {
+                text: qsTr("Cancel")
+                onClicked: dialog.close()
+            }
+            Button {
+                text: qsTr("Save")
+                enabled: dialog.check.ok
+                onClicked: {
+                    const error = App.saveSettings(rootField.text, argsField.text,
+                                                   maxCheck.checked)
+                    if (error.length > 0) {
+                        dialog.saveError = error
+                        return
+                    }
+                    dialog.close()
                 }
-                dialog.close()
             }
         }
     }

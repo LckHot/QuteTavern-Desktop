@@ -11,9 +11,11 @@ import QuteTavern
 ApplicationWindow {
     id: appWindow
 
-    width: 520
+    width: 640
     height: 720
-    minimumWidth: 440
+    // Wide enough for the widest dialog (Theme.dialogWidth plus its margins) so
+    // a resized window can never be narrower than a dialog.
+    minimumWidth: 640
     minimumHeight: 480
     title: qsTr("QuteTavern")
     visible: true

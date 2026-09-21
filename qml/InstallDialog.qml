@@ -13,7 +13,8 @@ Dialog {
 
     title: qsTr("Install SillyTavern from GitHub")
     modal: true
-    width: 560
+    width: Theme.dialogWidth
+    height: Math.min(implicitHeight, parent ? parent.height - 2 * Theme.dialogMargin : implicitHeight)
     anchors.centerIn: parent
 
     contentItem: ColumnLayout {
@@ -50,20 +51,26 @@ Dialog {
         }
     }
 
-    footer: RowLayout {
-        spacing: 8
+    footer: Item {
+        implicitHeight: footerRow.implicitHeight + 2 * Theme.dialogMargin
+        RowLayout {
+            id: footerRow
+            anchors.fill: parent
+            anchors.margins: Theme.dialogMargin
+            spacing: 8
 
-        Button {
-            text: qsTr("Start installation")
-            enabled: !App.installRunning
-            onClicked: App.installNew(parentField.text)
-        }
-        Item {
-            Layout.fillWidth: true
-        }
-        Button {
-            text: qsTr("Close")
-            onClicked: dialog.close()
+            Button {
+                text: qsTr("Start installation")
+                enabled: !App.installRunning
+                onClicked: App.installNew(parentField.text)
+            }
+            Item {
+                Layout.fillWidth: true
+            }
+            Button {
+                text: qsTr("Close")
+                onClicked: dialog.close()
+            }
         }
     }
 

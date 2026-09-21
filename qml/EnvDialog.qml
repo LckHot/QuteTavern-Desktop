@@ -13,7 +13,8 @@ Dialog {
 
     title: qsTr("Environment check")
     modal: true
-    width: 620
+    width: Theme.dialogWidth
+    height: Math.min(implicitHeight, parent ? parent.height - 2 * Theme.dialogMargin : implicitHeight)
     anchors.centerIn: parent
     visible: App.env.visible
 
@@ -43,20 +44,26 @@ Dialog {
         }
     }
 
-    footer: RowLayout {
-        spacing: 8
+    footer: Item {
+        implicitHeight: footerRow.implicitHeight + 2 * Theme.dialogMargin
+        RowLayout {
+            id: footerRow
+            anchors.fill: parent
+            anchors.margins: Theme.dialogMargin
+            spacing: 8
 
-        Button {
-            text: App.env.exitLabel
-            onClicked: App.env.quit()
-        }
-        Item {
-            Layout.fillWidth: true
-        }
-        Button {
-            text: App.env.downloadLabel
-            enabled: App.env.canDownload && !App.env.busy
-            onClicked: App.env.done ? App.env.accept() : App.env.download()
+            Button {
+                text: App.env.exitLabel
+                onClicked: App.env.quit()
+            }
+            Item {
+                Layout.fillWidth: true
+            }
+            Button {
+                text: App.env.downloadLabel
+                enabled: App.env.canDownload && !App.env.busy
+                onClicked: App.env.done ? App.env.accept() : App.env.download()
+            }
         }
     }
 }
