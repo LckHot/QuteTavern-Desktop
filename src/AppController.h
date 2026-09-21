@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
-#include <QColor>
 #include <QObject>
 #include <QPointer>
 #include <QThread>
@@ -31,12 +30,6 @@ class AppController : public QObject {
 
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
     Q_PROPERTY(QString homePath READ homePath CONSTANT)
-    // The application palette's "window" role: the colour a QDialog uses, i.e.
-    // what the widget build's dialogs were painted with. Qt Quick style themes
-    // (KDE's Breeze QQC2 style, for one) remap the palette a QML popup sees, so
-    // the dialogs take their background colour from here instead of trusting
-    // whatever the active style hands them.
-    Q_PROPERTY(QColor windowColor READ windowColor CONSTANT)
     // EnvCheck runs at startup: announces itself through its own `visible`.
     Q_PROPERTY(QObject *env READ env CONSTANT)
 
@@ -87,7 +80,6 @@ public:
 
     QString appVersion() const;
     QString homePath() const;
-    QColor windowColor() const;
     QObject *env() const { return reinterpret_cast<QObject *>(m_env); }
 
     bool wizardVisible() const { return !m_bound; }
