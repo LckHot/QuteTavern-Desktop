@@ -2,6 +2,7 @@ build/
 build-*/
 .zcode/
 dist/
+pkgroot/
 AppDir/
 icon.iconset/
 icon.icns
