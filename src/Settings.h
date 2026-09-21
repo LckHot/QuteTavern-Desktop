@@ -16,7 +16,6 @@ struct Settings {
     QString stRoot;               // SillyTavern install directory (empty = not bound)
     QStringList extraBackendArgs; // extra arguments passed to server.js
     bool autoMaximize = true;     // maximize the ST window when it opens
-    bool rememberWindowState = true; // remember ST window geometry
     bool hasWindowState = false;
     WindowGeometry windowState;
 

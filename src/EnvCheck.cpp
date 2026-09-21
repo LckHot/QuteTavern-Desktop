@@ -4,23 +4,16 @@
 #include "Util.h"
 
 #include <QCoreApplication>
-#include <QDialog>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLabel>
-#include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
-#include <QProgressBar>
-#include <QPushButton>
 #include <QSysInfo>
-#include <QTemporaryFile>
 #include <QThread>
-#include <QVBoxLayout>
 
 namespace {
 
@@ -54,148 +47,126 @@ QString nodeDownloadUrl(const QString &version, const QString &arch)
 #endif
 }
 
-class EnvDialog : public QDialog {
-    Q_OBJECT
+} // namespace
 
-public:
-    explicit EnvDialog(bool nodeMissing, bool gitMissing, QWidget *parent)
-        : QDialog(parent)
-        , m_nodeMissing(nodeMissing)
-        , m_gitMissing(gitMissing)
-    {
-        setWindowTitle(QStringLiteral("Environment check"));
-        setModal(true);
-        resize(560, 300);
+EnvCheck::EnvCheck(QObject *parent)
+    : QObject(parent)
+    , m_nodeVersion(QString::fromLatin1(kFallbackNodeVersion))
+{
+    m_nodeMissing = Util::findCommand(QStringLiteral("node")).isEmpty();
+    m_gitMissing = Util::findCommand(QStringLiteral("git")).isEmpty();
+    if (!m_nodeMissing && !m_gitMissing)
+        return; // nothing to do: the dialog stays hidden
 
-        auto *lay = new QVBoxLayout(this);
-        lay->setSpacing(10);
+    m_visible = true;
+    m_arch = nodeArch();
+    const QString cpu = QSysInfo::currentCpuArchitecture();
 
-        m_arch = nodeArch();
-        const QString cpu = QSysInfo::currentCpuArchitecture();
-
-        QString body = QStringLiteral(
-            "SillyTavern needs the following components; these are missing:\n\n");
-        body += QStringLiteral("CPU architecture: %1%2\n\n")
-                    .arg(cpu,
-                         m_arch.isEmpty()
-                             ? QStringLiteral(" (no official Node.js build for it)")
-                             : QStringLiteral(" (will download the %1 build)").arg(m_arch));
-        if (nodeMissing)
-            body += QStringLiteral(
-                "  ✗ Node.js - will download the official portable build (~30 MB) "
-                "into the application directory\n");
-        else
-            body += QStringLiteral("  ✓ Node.js\n");
-#if defined(Q_OS_WIN)
-        if (gitMissing)
-            body += QStringLiteral(
-                "  ✗ git - will download Git for Windows (MinGit, ~45 MB) "
-                "into the application directory\n");
-        else
-            body += QStringLiteral("  ✓ git\n");
-#elif defined(Q_OS_MAC)
-        if (gitMissing)
-            body += QStringLiteral(
-                "  ✗ git - on macOS git ships with the Xcode command line tools, "
-                "run: xcode-select --install\n");
-        else
-            body += QStringLiteral("  ✓ git\n");
-#else
-        if (gitMissing)
-            body += QStringLiteral(
-                "  ✗ git - there is no official portable build for Linux; install it "
-                "from your distribution, e.g. sudo dnf install git\n"
-                "      (without git, \"Install a new copy\" and \"Check for updates\" are "
-                "unavailable; starting the backend still works)\n");
-        else
-            body += QStringLiteral("  ✓ git\n");
-#endif
+    QString body = QStringLiteral("SillyTavern needs the following components; these are missing:\n\n");
+    body += QStringLiteral("CPU architecture: %1%2\n\n")
+                .arg(cpu,
+                     m_arch.isEmpty()
+                         ? QStringLiteral(" (no official Node.js build for it)")
+                         : QStringLiteral(" (will download the %1 build)").arg(m_arch));
+    if (m_nodeMissing)
         body += QStringLiteral(
-            "\nDownloaded components are stored in the application data directory and do "
-            "not affect the system environment. You can also quit and install them yourself.");
-
-        auto *text = new QLabel(body, this);
-        text->setWordWrap(true);
-        m_status = new QLabel(this);
-        m_status->setWordWrap(true);
-        m_bar = new QProgressBar(this);
-        m_bar->hide();
-
-        m_exitBtn = new QPushButton(QStringLiteral("Quit"), this);
-        m_dlBtn = new QPushButton(
-            nodeMissing ? QStringLiteral("Download and install into the application directory")
-                        : QStringLiteral("Download git into the application directory"),
-            this);
-        m_dlBtn->setDefault(true);
-        // Unsupported CPU architecture: never guess an instruction set - disable
-        // the download and point at a manual installation instead
-        if (m_arch.isEmpty()) {
-            m_dlBtn->setEnabled(false);
-            m_status->setText(QStringLiteral(
-                "There is no official Node.js binary for this CPU architecture (%1).\n"
-                "Please quit and install Node.js (>= 20) and git manually, "
-                "then start the app again.")
-                .arg(cpu));
-        }
-        auto *bbox = new QHBoxLayout();
-        bbox->addWidget(m_exitBtn);
-        bbox->addStretch(1);
-        bbox->addWidget(m_dlBtn);
-
-        lay->addWidget(text, 1);
-        lay->addWidget(m_status);
-        lay->addWidget(m_bar);
-        lay->addLayout(bbox);
-
-        connect(m_exitBtn, &QPushButton::clicked, this, [this] {
-            m_aborted = true;
-            reject();
-        });
-        connect(m_dlBtn, &QPushButton::clicked, this, [this] { startDownloads(); });
-    }
-
-    bool succeeded() const { return m_done && !m_aborted; }
-
-private slots:
-    void startDownloads()
-    {
-        if (m_arch.isEmpty() || m_aborted)
-            return;
-        m_dlBtn->setEnabled(false);
-        m_exitBtn->setText(QStringLiteral("Cancel"));
-        m_bar->show();
-        m_step = 0;
-        nextStep();
-    }
-
-private:
-    void nextStep();
-    void fetchNodeVersion();
-#ifdef Q_OS_WIN
-    void fetchMinGitUrl(); // MinGit is the portable git fallback for Windows only
+            "  ✗ Node.js - will download the official portable build (~30 MB) "
+            "into the application directory\n");
+    else
+        body += QStringLiteral("  ✓ Node.js\n");
+#if defined(Q_OS_WIN)
+    if (m_gitMissing)
+        body += QStringLiteral(
+            "  ✗ git - will download Git for Windows (MinGit, ~45 MB) "
+            "into the application directory\n");
+    else
+        body += QStringLiteral("  ✓ git\n");
+#elif defined(Q_OS_MAC)
+    if (m_gitMissing)
+        body += QStringLiteral(
+            "  ✗ git - on macOS git ships with the Xcode command line tools, "
+            "run: xcode-select --install\n");
+    else
+        body += QStringLiteral("  ✓ git\n");
+#else
+    if (m_gitMissing)
+        body += QStringLiteral(
+            "  ✗ git - there is no official portable build for Linux; install it "
+            "from your distribution, e.g. sudo dnf install git\n"
+            "      (without git, \"Install a new copy\" and \"Check for updates\" are "
+            "unavailable; starting the backend still works)\n");
+    else
+        body += QStringLiteral("  ✓ git\n");
 #endif
-    void downloadToFile(const QUrl &url, const std::function<void(const QString &)> &onSaved);
-    // Extraction blocks for seconds to minutes (the system tar runs to
-    // completion); it happens on a worker and reports back on the main thread
-    void extractArchiveAsync(const QString &archive, const QString &destDir, int stripComponents,
-                             const std::function<void(bool, const QString &err)> &done);
-    void finishOk();
+    body += QStringLiteral(
+        "\nDownloaded components are stored in the application data directory and do "
+        "not affect the system environment. You can also quit and install them yourself.");
+    m_body = body;
 
-    bool m_nodeMissing, m_gitMissing;
-    int m_step = 0;          // 0 = node, 1 = git
-    bool m_done = false;
-    bool m_aborted = false;
-    QString m_arch;          // Node download identifier (x64/arm64); empty = unsupported CPU
-    QString m_nodeVersion = QString::fromLatin1(kFallbackNodeVersion);
-    QLabel *m_status = nullptr;
-    QProgressBar *m_bar = nullptr;
-    QPushButton *m_exitBtn = nullptr;
-    QPushButton *m_dlBtn = nullptr;
-    QNetworkAccessManager m_nam;
-    QTemporaryFile m_tmp;
-};
+    m_downloadLabel = m_nodeMissing
+                          ? QStringLiteral("Download and install into the application directory")
+                          : QStringLiteral("Download git into the application directory");
+    // Unsupported CPU architecture: never guess an instruction set - disable the
+    // download and point at a manual installation instead
+    if (m_arch.isEmpty()) {
+        m_canDownload = false;
+        m_status = QStringLiteral(
+                       "There is no official Node.js binary for this CPU architecture (%1).\n"
+                       "Please quit and install Node.js (>= 22) and git manually, "
+                       "then start the app again.")
+                       .arg(cpu);
+    }
+}
 
-void EnvDialog::nextStep()
+void EnvCheck::setStatus(const QString &text)
+{
+    if (m_status == text)
+        return;
+    m_status = text;
+    emit changed();
+}
+
+void EnvCheck::setProgress(double value)
+{
+    if (qFuzzyCompare(m_progress, value))
+        return;
+    m_progress = value;
+    emit changed();
+}
+
+void EnvCheck::setBusy(bool busy)
+{
+    if (m_busy == busy)
+        return;
+    m_busy = busy;
+    emit changed();
+}
+
+void EnvCheck::download()
+{
+    if (!m_canDownload || m_busy || m_done || m_aborted)
+        return;
+    setBusy(true);
+    m_exitLabel = QStringLiteral("Cancel");
+    setProgress(-1);
+    emit changed();
+    m_step = 0;
+    nextStep();
+}
+
+void EnvCheck::accept()
+{
+    m_visible = false;
+    emit changed();
+}
+
+void EnvCheck::quit()
+{
+    m_aborted = true;
+    emit quitRequested();
+}
+
+void EnvCheck::nextStep()
 {
     if (m_aborted)
         return;
@@ -218,9 +189,9 @@ void EnvDialog::nextStep()
     }
 }
 
-void EnvDialog::fetchNodeVersion()
+void EnvCheck::fetchNodeVersion()
 {
-    m_status->setText(QStringLiteral("Fetching the latest Node.js LTS version..."));
+    setStatus(QStringLiteral("Fetching the latest Node.js LTS version..."));
     QNetworkRequest req{QUrl(QStringLiteral("https://nodejs.org/dist/index.json"))};
     QNetworkReply *r = m_nam.get(req);
     connect(r, &QNetworkReply::finished, this, [this, r] {
@@ -229,64 +200,72 @@ void EnvDialog::fetchNodeVersion()
             return;
         if (r->error() == QNetworkReply::NoError) {
             const auto arr = QJsonDocument::fromJson(r->readAll()).array();
-            // index.json is sorted newest first, so the first entry is the
-            // latest release (Node 20 and older are end of life)
+            // index.json is sorted newest first and marks LTS releases with a
+            // codename in "lts" (false on current releases): take the newest LTS
             if (!arr.isEmpty()) {
-                const QString latest = arr.first().toObject().value("version").toString();
-                if (!latest.isEmpty())
-                    m_nodeVersion = latest;
+                for (const QJsonValue &entry : arr) {
+                    const QJsonObject obj = entry.toObject();
+                    if (obj.value("lts").isString()) {
+                        m_nodeVersion = obj.value("version").toString();
+                        break;
+                    }
+                }
+                if (m_nodeVersion.isEmpty())
+                    m_nodeVersion = arr.first().toObject().value("version").toString();
             }
         }
-        m_status->setText(QStringLiteral("Downloading Node.js %1 (%2)...")
-                              .arg(m_nodeVersion, m_arch));
-        downloadToFile(QUrl(nodeDownloadUrl(m_nodeVersion, m_arch)),
-                       [this](const QString &path) {
-                           m_status->setText(QStringLiteral("Extracting Node.js..."));
-                           const QString dest = Util::runtimeDir() + "/node-dist";
-                           QDir(dest).removeRecursively();
-                           // The official archives contain a single top-level
-                           // node-vX-<os>-<arch>/ directory; stripping it yields
-                           // <dest>/bin/node (on Windows <dest>/node.exe)
-                           extractArchiveAsync(path, dest, 1, [this, dest](bool ok, const QString &err) {
-                               if (!ok) {
-                                   m_status->setText(QStringLiteral("Extraction failed: %1").arg(err));
-                                   m_exitBtn->setText(QStringLiteral("Close"));
-                                   m_dlBtn->setEnabled(true);
-                                   return;
-                               }
-                               // Verify the extracted layout (catches unexpected archives).
-                               // The preprocessor condition stays outside of
-                               // QStringLiteral(): MSVC cannot expand a macro whose
-                               // argument contains preprocessor directives.
+        setStatus(QStringLiteral("Downloading Node.js %1 (%2)...").arg(m_nodeVersion, m_arch));
+        downloadToFile(QUrl(nodeDownloadUrl(m_nodeVersion, m_arch)), [this](const QString &path) {
+            setStatus(QStringLiteral("Extracting Node.js..."));
+            const QString dest = Util::runtimeDir() + QStringLiteral("/node-dist");
+            QDir(dest).removeRecursively();
+            // The official archives contain a single top-level
+            // node-vX-<os>-<arch>/ directory; stripping it yields
+            // <dest>/bin/node (on Windows <dest>/node.exe)
+            extractArchiveAsync(path, dest, 1, [this, dest](bool ok, const QString &err) {
+                if (m_aborted)
+                    return;
+                if (!ok) {
+                    setStatus(QStringLiteral("Extraction failed: %1").arg(err));
+                    m_exitLabel = QStringLiteral("Close");
+                    setBusy(false);
+                    emit changed();
+                    return;
+                }
+                // Verify the extracted layout (catches unexpected archives).
+                // The preprocessor condition stays outside of
+                // QStringLiteral(): MSVC cannot expand a macro whose
+                // argument contains preprocessor directives.
 #ifdef Q_OS_WIN
-                               const QString nodeExe = QStringLiteral("/node.exe");
+                const QString nodeExe = QStringLiteral("/node.exe");
 #else
-                               const QString nodeExe = QStringLiteral("/node");
+                const QString nodeExe = QStringLiteral("/node");
 #endif
-                               const QString nodeBin = Util::nodeBinDir() + nodeExe;
-                               if (!QFileInfo::exists(nodeBin)) {
-                                   QDir(dest).removeRecursively();
-                                   m_status->setText(QStringLiteral(
-                                       "The extracted archive does not contain a node executable "
-                                       "(unexpected layout).\n"
-                                       "You can quit and install Node.js (>= 20) manually."));
-                                   m_exitBtn->setText(QStringLiteral("Close"));
-                                   m_dlBtn->setEnabled(true);
-                                   return;
-                               }
-                               m_step = 1;
-                               nextStep();
-                           });
-                       });
+                const QString nodeBin = Util::nodeBinDir() + nodeExe;
+                if (!QFileInfo::exists(nodeBin)) {
+                    QDir(dest).removeRecursively();
+                    setStatus(QStringLiteral(
+                        "The extracted archive does not contain a node executable "
+                        "(unexpected layout).\n"
+                        "You can quit and install Node.js (>= 22) manually."));
+                    m_exitLabel = QStringLiteral("Close");
+                    setBusy(false);
+                    emit changed();
+                    return;
+                }
+                m_step = 1;
+                nextStep();
+            });
+        });
     });
 }
 
 #ifdef Q_OS_WIN
 // Windows only: elsewhere git either ships with the OS tooling (macOS) or has to
 // come from the distribution - the dialog says so and downloadToFile is not used.
-void EnvDialog::fetchMinGitUrl()
+void EnvCheck::fetchMinGitUrl()
 {
-    m_status->setText(QStringLiteral("Fetching the MinGit download URL..."));
+    setStatus(QStringLiteral("Fetching the MinGit download URL..."));
     QNetworkRequest req{
         QUrl(QStringLiteral("https://api.github.com/repos/git-for-windows/git/releases/latest"))};
     req.setRawHeader("Accept", "application/vnd.github+json");
@@ -301,28 +280,30 @@ void EnvDialog::fetchMinGitUrl()
                 QJsonDocument::fromJson(r->readAll()).object().value("assets").toArray();
             for (const auto &a : assets) {
                 const QString name = a.toObject().value("name").toString();
-                if (name.startsWith("MinGit-") && name.endsWith("-64-bit.zip")) {
+                if (name.startsWith(QStringLiteral("MinGit-")) && name.endsWith(QStringLiteral("-64-bit.zip"))) {
                     url = a.toObject().value("browser_download_url").toString();
                     break;
                 }
             }
         }
         if (url.isEmpty()) {
-            m_status->setText(QStringLiteral(
+            setStatus(QStringLiteral(
                 "Could not resolve the MinGit URL (install git on the system and restart "
                 "the app later)"));
             finishOk();
             return;
         }
-        m_status->setText(QStringLiteral("Downloading MinGit..."));
+        setStatus(QStringLiteral("Downloading MinGit..."));
         downloadToFile(QUrl(url), [this](const QString &path) {
-            m_status->setText(QStringLiteral("Extracting MinGit..."));
-            const QString dest = Util::runtimeDir() + "/mingit";
+            setStatus(QStringLiteral("Extracting MinGit..."));
+            const QString dest = Util::runtimeDir() + QStringLiteral("/mingit");
             QDir(dest).removeRecursively();
             // The MinGit zip has no top-level directory, so nothing is stripped
             extractArchiveAsync(path, dest, 0, [this](bool ok, const QString &err) {
+                if (m_aborted)
+                    return;
                 if (!ok)
-                    m_status->setText(QStringLiteral("Extraction failed: %1").arg(err));
+                    setStatus(QStringLiteral("Extraction failed: %1").arg(err));
                 finishOk();
             });
         });
@@ -330,23 +311,21 @@ void EnvDialog::fetchMinGitUrl()
 }
 #endif // Q_OS_WIN
 
-void EnvDialog::downloadToFile(const QUrl &url,
-                               const std::function<void(const QString &)> &onSaved)
+void EnvCheck::downloadToFile(const QUrl &url, const std::function<void(const QString &)> &onSaved)
 {
     if (!m_tmp.open()) {
-        m_status->setText(QStringLiteral("Could not create a temporary file"));
+        setStatus(QStringLiteral("Could not create a temporary file"));
+        setBusy(false);
         return;
     }
     m_tmp.resize(0);
     QNetworkRequest req{url};
     QNetworkReply *r = m_nam.get(req);
     connect(r, &QNetworkReply::downloadProgress, this, [this](qint64 got, qint64 total) {
-        if (total > 0) {
-            m_bar->setRange(0, 100);
-            m_bar->setValue(int(got * 100 / total));
-        } else {
-            m_bar->setRange(0, 0); // indeterminate
-        }
+        if (total > 0)
+            setProgress(double(got) * 100.0 / double(total));
+        else
+            setProgress(-1); // indeterminate
     });
     // Stream to disk: the archives are 30-45 MB and should not be held in memory
     connect(r, &QNetworkReply::readyRead, this, [this, r] { m_tmp.write(r->readAll()); });
@@ -355,12 +334,13 @@ void EnvDialog::downloadToFile(const QUrl &url,
         if (m_aborted)
             return;
         if (r->error() != QNetworkReply::NoError) {
-            m_status->setText(QStringLiteral("Download failed: %1\n"
-                                             "Check your network and retry, or quit and "
-                                             "install the component yourself.")
-                                  .arg(r->errorString()));
-            m_exitBtn->setText(QStringLiteral("Close"));
-            m_dlBtn->setEnabled(true);
+            setStatus(QStringLiteral("Download failed: %1\n"
+                                     "Check your network and retry, or quit and "
+                                     "install the component yourself.")
+                          .arg(r->errorString()));
+            m_exitLabel = QStringLiteral("Close");
+            setBusy(false);
+            emit changed();
             return;
         }
         m_tmp.write(r->readAll()); // drain whatever is left in the buffer
@@ -370,27 +350,22 @@ void EnvDialog::downloadToFile(const QUrl &url,
     });
 }
 
-void EnvDialog::extractArchiveAsync(const QString &archive, const QString &destDir,
-                                    int stripComponents,
-                                    const std::function<void(bool, const QString &)> &done)
+void EnvCheck::extractArchiveAsync(const QString &archive, const QString &destDir, int stripComponents,
+                                   const std::function<void(bool, const QString &)> &done)
 {
     // The archives are 30-45 MB and extraction needs seconds to a minute:
-    // blocking the dialog here would freeze the window (DESIGN section 8.1 asks
-    // for the opposite). The result is posted back to qApp and the QPointer
-    // drops it when the dialog was closed while the worker was running.
-    if (m_bar) {
-        m_bar->setRange(0, 0); // indeterminate: extraction reports no progress
-        m_bar->show();
-    }
-    const QPointer<EnvDialog> guard(this);
+    // blocking here would freeze the window (DESIGN section 8.1 asks for the
+    // opposite). The result is posted back to qApp and the QPointer drops it
+    // when the object is gone.
+    setProgress(-1); // indeterminate: extraction reports no progress
+    const QPointer<EnvCheck> guard(this);
     auto *worker = QThread::create([archive, destDir, stripComponents, done, guard] {
         QString err;
         const bool ok = Util::extractArchive(archive, destDir, stripComponents, &err);
         QMetaObject::invokeMethod(qApp, [guard, done, ok, err] {
             if (!guard)
                 return;
-            if (guard->m_bar)
-                guard->m_bar->setRange(0, 100);
+            guard->setProgress(100);
             done(ok, err);
         });
     });
@@ -398,7 +373,7 @@ void EnvDialog::extractArchiveAsync(const QString &archive, const QString &destD
     worker->start();
 }
 
-void EnvDialog::finishOk()
+void EnvCheck::finishOk()
 {
     m_done = true;
     // Re-check
@@ -409,38 +384,11 @@ void EnvDialog::finishOk()
     const QString git = Util::findCommand(QStringLiteral("git"));
     result += git.isEmpty() ? QStringLiteral("✗ git still not found\n")
                             : QStringLiteral("✓ git: %1\n").arg(git);
-    m_status->setText(QStringLiteral("Installation finished.\n%1").arg(result));
-    m_bar->hide();
-    m_exitBtn->setText(QStringLiteral("Close"));
-    m_dlBtn->setText(QStringLiteral("Continue"));
-    disconnect(m_dlBtn, &QPushButton::clicked, nullptr, nullptr);
-    connect(m_dlBtn, &QPushButton::clicked, this, [this] {
-        m_aborted = false;
-        accept();
-    });
-    m_dlBtn->setEnabled(true);
-    m_dlBtn->setDefault(true);
+    setStatus(QStringLiteral("Installation finished.\n%1").arg(result));
+    m_progress = -1;
+    setBusy(false);
+    m_exitLabel = QStringLiteral("Close");
+    m_downloadLabel = QStringLiteral("Continue");
+    m_canDownload = true;
+    emit changed();
 }
-
-} // namespace
-
-namespace EnvCheck {
-
-bool ensureEnvironment(QWidget *parent)
-{
-    const bool nodeMissing = Util::findCommand(QStringLiteral("node")).isEmpty();
-    const bool gitMissing = Util::findCommand(QStringLiteral("git")).isEmpty();
-    if (!nodeMissing && !gitMissing)
-        return true;
-
-    EnvDialog dlg(nodeMissing, gitMissing, parent);
-    dlg.exec();
-    // "Continue" = accept; "Quit" - or simply closing the window (Qt rejects) -
-    // terminates the application. When the downloads already finished
-    // (succeeded), closing the window still lets the app start.
-    return dlg.succeeded() || dlg.result() == QDialog::Accepted;
-}
-
-} // namespace EnvCheck
-
-#include "EnvCheck.moc"

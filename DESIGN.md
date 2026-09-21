@@ -11,7 +11,7 @@ Provide a **cross-platform desktop launcher** for
 [SillyTavern](https://github.com/SillyTavern/SillyTavern) (a Node.js backend
 with a web front end):
 
-- The **management window** (native widgets) opens first; the backend child
+- The **management window** (Qt Quick/QML) opens first; the backend child
   process is only spawned after pressing "Start"
 - The SillyTavern front end is shown in a **separate browser-engine window**
   (Qt WebEngine / Chromium)
@@ -26,10 +26,12 @@ One process, one toolchain (Qt 6 / C++17), one code base for all three
 platforms (Linux / Windows / macOS).
 
 ```
-┌─ Management window MainWindow (Qt Widgets, always present) ─────────────┐
+┌─ Management window qml/Main.qml (Qt Quick, always present) ─────────────┐
 │ Wizard page: bind a directory / install a new copy from GitHub          │
 │ Main page: start/stop/open the ST window · status · live log panel      │
 │ Dialogs: preferences / check for updates / install / environment check  │
+│ AppController is the only bridge to the logic layer below (properties   │
+│ and invokables); no dialog and no window chrome is built in C++         │
 └──────────────┬──────────────────────────────────────────────────────────┘
                │ Backend signals (logLine / stateChanged /
                │          foreignInstanceFound)
@@ -41,9 +43,10 @@ platforms (Linux / Windows / macOS).
    SillyTavern Node backend (127.0.0.1:8000)
                │ "Go to: http://…" (stdout)
                ▼
-┌─ ST window StWindow (QWebEngineView) ───────────────────────────────────┐
-│ The management window drives its lifecycle from state events:           │
-│ entering Running → open and load the URL; leaving Running → close       │
+┌─ ST window qml/StWindow.qml (Window + WebEngineView) ───────────────────┐
+│ Created on demand and destroyed on close, driven by the management       │
+│ window's state events: entering Running → open and load the URL;         │
+│ leaving Running → close                                                  │
 │ User closes the ST window → backend keeps running (can be reopened)     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -59,21 +62,34 @@ When the backend crashes the ST window closes automatically, and the error plus
 the log are presented in the management window - **backend running ⟺ ST window
 exists** (unless the user closed it), no hidden state.
 
-The page's Fullscreen API is enabled and driven by StWindow: entering fullscreen
-makes the window fullscreen, Escape exits it like a browser, leaving restores
-the window state from before (maximized or normal), and a fullscreen geometry
-is never written back to Settings. "Open ST window" raises a fullscreen window
-instead of forcing it back to normal, so window and page state stay in sync.
+The page's Fullscreen API is enabled and **answered without touching the window**:
+
+- every request is accepted; Qt WebEngine then makes the requesting element fill
+  the view — which *is* the ST window's content area. Nothing else is required.
+- the launcher deliberately never switches the window into a platform fullscreen
+  state: on Wayland the window system decides a window's size and position, and
+  the fullscreen/maximized/normal flip is what left the window restored to a
+  stale default size and the input method without a focus target.
+- Escape exits the page fullscreen, armed while the page holds a fullscreen
+  element (`WebEngineView.isFullScreen` is the single source of truth); focus and
+  the input method are re-armed afterwards.
+- a borderless *real* fullscreen stays available from the window system
+  (compositor shortcut). The launcher never fights it and the page's fullscreen
+  element is unaffected by it.
+- only maximized geometries are kept out of Settings, and the window is seeded
+  with its remembered normal size before it is first maximized, so un-maximizing
+  never lands on the platform's default 640x480.
 
 ## 3. Module design
 
 | File | Responsibility |
 | --- | --- |
-| `main.cpp` | QApplication bootstrap, single instance (QLocalServer), environment check entry point |
-| `EnvCheck.{h,cpp}` | Detects node/git at startup; dialog (quit / download automatically); downloader + extraction + re-check |
-| `MainWindow.{h,cpp}` | All UI of the management window; ST window lifecycle; every dialog |
+| `main.cpp` | QGuiApplication + QtWebEngineQuick bootstrap, single instance (QLocalServer), QML engine |
+| `qml/Main.qml` (+ pages/dialogs) | The whole UI: wizard page, main page, preferences / update / install / environment check / foreign instance / message dialogs |
+| `qml/StWindow.qml` | ST window (`Window` + `WebEngineView`): lifecycle, geometry, the fullscreen state machine |
+| `AppController.{h,cpp}` | The only C++↔QML bridge: settings, backend and ST window lifecycle, worker threads, every action the UI can trigger |
+| `EnvCheck.{h,cpp}` | Detects node/git at startup; downloader + extraction + re-check; its dialog is QML |
 | `Backend.{h,cpp}` | Backend child process state machine (the core, see §4) |
-| `StWindow.{h,cpp}` | WebEngine window; writes its geometry back to Settings on close |
 | `Settings.{h,cpp}` | Launcher configuration (JSON); on Linux it falls back to the legacy configuration path |
 | `Util.{h,cpp}` | Platform abstraction + general utilities (see §5); single place for command lookup |
 | `Updater.{h,cpp}` | Update check / update execution (pure logic, called from a worker thread) |
@@ -199,7 +215,7 @@ findable - detection would succeed while starting the backend failed.
   (`status --porcelain -uno`, untracked files do not block) → checkout tag →
   npm install.
 - **Settings** (`<AppConfigLocation>/config.json`): `st_root`,
-  `extra_backend_args`, `auto_maximize`, `remember_window_state`,
+  `extra_backend_args`, `auto_maximize`,
   `window_state{x,y,w,h}`. Missing fields are tolerated; saving preserves the
   `window_state` that is not part of the form; on Linux a configuration file
   written by earlier launcher builds is picked up as a fallback.
@@ -210,7 +226,7 @@ findable - detection would succeed while starting the backend failed.
 | --- | --- |
 | Global data mode (`--global`) | Data is separated from the code checkout; git operations (updates) never touch user data; XDG standard locations |
 | Press-to-start instead of auto start | User request; the management window is meant to be the control centre |
-| Qt Widgets + Qt WebEngine as a single toolchain | The only mature route that combines cross-platform support, a native look and an embedded Chromium |
+| Qt Quick + Qt WebEngine as a single toolchain | QML is Qt's recommended UI layer for new work (and the route the official WebEngine examples use); the logic layer stays plain C++ behind one bridge object, so the state machine and the platform code are unaffected |
 | Built-in components appended to PATH instead of prepended | System components win; the user environment is not shadowed by the application directory |
 | Explicit dialog for foreign instances | Silently attaching means no log and no explanation; taking over restores the full log |
 | License: AGPL-3.0 | The application icon is SillyTavern's official artwork, which is AGPL-3.0; licensing the launcher the same way keeps the whole distribution under one license and matches what the community expects. Qt is only linked dynamically, so its LGPL-3.0 terms stay satisfiable (see THIRD_PARTY_NOTICES.md) |

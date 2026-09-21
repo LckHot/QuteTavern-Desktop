@@ -3,12 +3,15 @@
 #
 # Build a Debian and an RPM package around a binary that links the
 # distribution's Qt. Qt is deliberately *not* bundled: the packages declare the
-# Qt libraries they need and let the system's package manager provide them.
+# Qt libraries and QML modules they need and let the system's package manager
+# provide them.
 #
 #   make-packages.sh <binary> <version> <output-dir>
 #
-# The binary has to be built against the Qt of the target distribution (the CI
-# builds the .deb on Ubuntu and the .rpm inside a Fedora container).
+# The binary is built against the official Qt binaries at the floor version the
+# CI pins (QT_VERSION_FLOOR in .github/workflows/build.yml), and the packages
+# are installed and started on a distribution that ships a Qt at or above that
+# floor (.deb: a Debian container, .rpm: a Fedora container).
 set -euo pipefail
 
 BINARY="$(realpath "${1:?usage: make-packages.sh <binary> <version> <output-dir>}")"
@@ -50,16 +53,26 @@ SIZE_KB=$(du -sk "$ROOT" | cut -f1)
 
 # ---------- Debian ----------
 if command -v dpkg-deb >/dev/null 2>&1; then
-    # The dependencies are explicit and CI-verified (the package is installed
-    # and started on Ubuntu 22.04 before it is published). dpkg-shlibdeps is
-    # deliberately not used: the build links the official Qt 6.2.4 binaries,
-    # whose libraries belong to no Debian package.
-    # qt6-qpa-plugins (platform plugins) and libqt6webenginecore6-bin (the
-    # WebEngine helper process and its resources) are runtime-only packages
-    # that the shared library list above cannot express
-    DEPENDS="libc6 (>= 2.35), libgcc-s1, libstdc++6, libgl1, libx11-6, libx11-xcb1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libnss3, libnspr4, libasound2, libdbus-1-3, libgbm1, libqt6core6 (>= 6.2), libqt6gui6 (>= 6.2), libqt6widgets6 (>= 6.2), libqt6network6 (>= 6.2), libqt6opengl6 (>= 6.2), libqt6printsupport6 (>= 6.2), libqt6webchannel6 (>= 6.2), libqt6positioning6 (>= 6.2), libqt6webenginecore6 (>= 6.2), libqt6webenginewidgets6 (>= 6.2), libqt6webenginecore6-bin (>= 6.2), qt6-qpa-plugins"
-    # WebEngine needs its runtime data (helper process, resources) and Qt its
-    # platform plugins; neither is covered by the shared library dependencies
+    # The dependencies are explicit and CI-verified (the package is installed and
+    # started inside a Debian container before it is published). dpkg-shlibdeps is
+    # deliberately not used: the build links the official Qt binaries, whose
+    # libraries belong to no Debian package.
+    #
+    # Three groups, for three different reasons:
+    #  - the system libraries Qt and Chromium need at runtime
+    #  - the Qt libraries this binary links (Qt 6.5 floor: the QML UI uses
+    #    QQmlApplicationEngine::loadFromModule, added in 6.5, and the native
+    #    folder dialogs from Qt 6.3)
+    #  - the QML modules, which are loaded by the QML engine at runtime and are
+    #    therefore invisible to the shared library dependencies: the dialogs and
+    #    pages import QtQuick.Controls (which pulls Templates/Controls2), the
+    #    layout types come from QtQuick.Layouts, and the web view is
+    #    QtWebEngine's QML module. qt6-qpa-plugins provides the platform plugins
+    #    and libqt6webenginecore6-bin the WebEngine helper process + resources.
+    DEPENDS="libc6 (>= 2.35), libgcc-s1, libstdc++6, libgl1, libx11-6, libx11-xcb1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libnss3, libnspr4, libasound2, libdbus-1-3, libgbm1, libqt6core6 (>= 6.5), libqt6gui6 (>= 6.5), libqt6network6 (>= 6.5), libqt6qml6 (>= 6.5), libqt6quick6 (>= 6.5), libqt6quickcontrols2-6 (>= 6.5), libqt6quicktemplates2-6 (>= 6.5), libqt6webchannel6 (>= 6.5), libqt6positioning6 (>= 6.5), libqt6webenginecore6 (>= 6.5), libqt6webenginequick6 (>= 6.5), libqt6webenginecore6-bin (>= 6.5), qml6-module-qtqml, qml6-module-qtquick, qml6-module-qtquick-window, qml6-module-qtquick-templates, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-dialogs, qml6-module-qtwebengine, qt6-qpa-plugins"
+    # The GL stack (libglx0, libopengl0, libegl1) is deliberately not repeated
+    # here: libqt6gui6 depends on all three, and this package depends on
+    # libqt6gui6 (checked against Debian's own metadata for trixie).
 
     mkdir -p "$ROOT/DEBIAN"
     cat > "$ROOT/DEBIAN/control" <<EOF
@@ -92,10 +105,18 @@ if command -v rpmbuild >/dev/null 2>&1; then
     # makes that possible), so it is excluded explicitly
     tar -C "$ROOT" --exclude="DEBIAN" -czf "$RPMTOP/SOURCES/payload.tar.gz" .
 
-    # No manual Requires: rpm's dependency generator records the SONAMEs of
-    # every library the binary links (libQt6Widgets.so.6, ...). Any RPM
-    # distribution that provides those libraries satisfies the package, which
-    # keeps it usable on Fedora, RHEL and openSUSE alike.
+    # No manual Requires: rpm's dependency generator records the SONAMEs of the
+    # libraries the binary actually links. That is libQt6Qml.so.6 and
+    # libQt6WebEngineQuick.so.6 - not libQt6Quick.so.6, because Qt Quick is
+    # loaded by the QML engine at runtime and the linker drops the dependency
+    # (nothing references its symbols directly). On Fedora, libQt6Qml.so.6 and
+    # libQt6WebEngineQuick.so.6 come from qt6-qtdeclarative and
+    # qt6-qtwebengine, the very packages that also carry the QML modules under
+    # /usr/lib64/qt6/qml - so both the libraries and the modules arrive through
+    # the same dependencies, which keeps the package usable on Fedora, RHEL and
+    # openSUSE alike. CI verifies the outcome, not the mechanism: it checks that
+    # the Qt libraries and the QML directories exist after `dnf install` in a
+    # clean Fedora container.
     cat > "$RPMTOP/SPECS/qutetavern.spec" <<EOF
 Name:      qutetavern
 Version:   $VERSION

@@ -20,6 +20,13 @@ export APPDIR="${APPDIR:-$HERE}"
 # AppDir should also work when executed directly)
 export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
+# The QML modules bundled by linuxdeploy-plugin-qt (QtQuick.Controls, its
+# styles, QtWebEngine, ...) live in usr/qml. The QML engine has to be told, or
+# it would look for the modules of the *system* Qt and fail when that Qt is
+# missing or has a different version.
+export QML2_IMPORT_PATH="${APPDIR}/usr/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+export QML_IMPORT_PATH="${APPDIR}/usr/qml${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
+
 export QTWEBENGINEPROCESS_PATH="${APPDIR}/usr/libexec/QtWebEngineProcess"
 export QTWEBENGINE_RESOURCES_PATH="${APPDIR}/usr/resources"
 export QTWEBENGINE_LOCALES_PATH="${APPDIR}/usr/translations/qtwebengine_locales"

@@ -21,12 +21,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Qt for the AppImage and the Windows/macOS packages: the current release.
-  QT_VERSION: '6.10.3'
-  # Qt for the .deb and the .rpm builds: the oldest Qt 6 release with a
-  # complete WebEngine, so the packages run on the widest range of
-  # distributions that provide Qt 6.2 or newer themselves.
-  QT_VERSION_FLOOR: '6.2.4'
+  # Qt for the AppImage and the macOS package. These bundles carry their own Qt,
+  # so nothing constrains the choice except being current: the newest stable
+  # patch release also carries the newest Chromium security fixes (the AppImage
+  # is the way an older distribution gets a working QML UI).
+  QT_VERSION: '6.11.2'
+  # Qt for the Windows installer, pinned separately on purpose: Qt 6.11
+  # publishes the Windows packages in per-compiler repositories
+  # (qt6_6112_msvc2022_64/ instead of qt6_6112/), which aqtinstall cannot read
+  # yet - not even its newest release - so install-qt-action@v4 fails to find
+  # the version. 6.10.3 is the newest release that installs; raise this to
+  # 6.11.x (and drop the variable) once aqtinstall understands the new layout.
+  QT_VERSION_WINDOWS: '6.10.3'
+  # Qt for the .deb and the .rpm builds: the floor the QML UI needs. Qt 6.5 is
+  # the minimum because the UI layer uses QQmlApplicationEngine::loadFromModule
+  # (added in 6.5) and the native folder dialogs (added in 6.3). Distributions
+  # that ship an older Qt (Ubuntu 22.04/24.04, Debian 12) are served by the
+  # AppImage, which carries its own Qt.
+  QT_VERSION_FLOOR: '6.5.3'
 
 jobs:
   linux-appimage:
@@ -139,7 +151,9 @@ jobs:
           set -e
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
           export APPIMAGE_EXTRACT_AND_RUN=1
-          export QML_SOURCES_PATHS=""           # widgets only, no QML to scan
+          # the QML sources are what tells linuxdeploy-plugin-qt which QML
+          # modules to bundle (QtQuick.Controls and its styles, QtWebEngine, ...)
+          export QML_SOURCES_PATHS="$PWD/qml"
           # the tools live in /tmp so that the working directory only contains
           # the artifact we build
           mkdir -p /tmp/tools
@@ -173,6 +187,22 @@ jobs:
           test -f AppDir/usr/lib/libQt6WebEngineCore.so.6
           test -x AppDir/AppRun
           echo "WebEngine helper, resources, locales and libraries are in place"
+          # the QML modules the UI imports have to be inside the bundle as well
+          QMLROOT=$(find AppDir -maxdepth 4 -type d -name qml | head -1)
+          [ -n "$QMLROOT" ] || {
+            echo "::error::no QML modules were bundled into the AppDir"
+            find AppDir -maxdepth 3 -type d
+            exit 1
+          }
+          for m in QtQuick QtQuick/Controls QtQuick/Controls/Basic QtQuick/Dialogs \
+                   QtQuick/Layouts QtQuick/Templates QtQuick/Window QtQml QtWebEngine; do
+            if [ ! -d "$QMLROOT/$m" ]; then
+              echo "::error::the QML module $m is missing from the bundle"
+              find "$QMLROOT" -maxdepth 2 -type d | head -40
+              exit 1
+            fi
+          done
+          echo "bundled QML modules: $QMLROOT"
           # nothing the bundle needs may be missing
           if LD_LIBRARY_PATH="$PWD/AppDir/usr/lib:$PWD/AppDir/usr/lib/x86_64-linux-gnu" \
                ldd AppDir/usr/libexec/QtWebEngineProcess | grep -q "not found"; then
@@ -199,6 +229,10 @@ jobs:
           echo "the AppImage started and stayed alive"
 
       - uses: actions/upload-artifact@v7
+        # upload even when a check above failed: the artifacts are meant to be
+        # tried on real machines, and a failing smoke test is no reason to hide
+        # the package. The release job still requires every job to succeed.
+        if: always()
         with:
           name: linux-appimage
           path: QuteTavern-*-x86_64.AppImage
@@ -221,15 +255,18 @@ jobs:
 
       - uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ env.QT_VERSION }}
+          version: ${{ env.QT_VERSION_WINDOWS }}
           arch: win64_msvc2022_64
           modules: 'qtwebengine qtwebchannel qtpositioning qtserialport'
           cache: true
 
       - name: Configure and build
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
           cmake --build build --config Release --parallel
+
+      - name: Run the unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Deploy the Qt runtime
         run: |
@@ -237,8 +274,10 @@ jobs:
           Copy-Item build\Release\qutetavern.exe dist\
           # windeployqt also copies QtWebEngineProcess.exe, its resources and the
           # locale packs; the compiler runtime is bundled so no VC++ redistributable
-          # has to be installed by the user.
-          windeployqt --release --compiler-runtime --no-translations dist\qutetavern.exe
+          # has to be installed by the user. --qmldir makes it scan the QML sources
+          # and copy the QML modules they import (QtQuick.Controls + its styles,
+          # QtWebEngine, ...): without them the app starts without a user interface.
+          windeployqt --release --compiler-runtime --no-translations --qmldir qml dist\qutetavern.exe
           # license notices travel inside the installation
           Copy-Item THIRD_PARTY_NOTICES.md dist\
           if (Test-Path LICENSE) { Copy-Item LICENSE dist\ }
@@ -252,12 +291,17 @@ jobs:
             "dist\Qt6WebEngineCore.dll",
             "dist\QtWebEngineProcess.exe",
             "dist\resources\icudtl.dat",
-            "dist\translations\qtwebengine_locales"
+            "dist\translations\qtwebengine_locales",
+            "dist\qml\QtQuick\Controls",
+            "dist\qml\QtQuick\Controls\Basic",
+            "dist\qml\QtQuick\Dialogs",
+            "dist\qml\QtQuick\Window",
+            "dist\qml\QtWebEngine"
           )
           foreach ($item in $required) {
             if (-not (Test-Path $item)) { throw "missing in the deployment: $item" }
           }
-          Write-Host "the Qt WebEngine runtime is complete"
+          Write-Host "the Qt WebEngine runtime and the QML modules are complete"
 
       - name: Startup smoke test (headless)
         run: |
@@ -305,6 +349,8 @@ jobs:
           Write-Host "install + start + uninstall round trip succeeded"
 
       - uses: actions/upload-artifact@v7
+        # see the AppImage job: artifacts are uploaded even if a check failed
+        if: always()
         with:
           name: windows-installer
           path: QuteTavern-*-Setup.exe
@@ -331,10 +377,13 @@ jobs:
 
       - name: Configure and build (universal binary)
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
                 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
           cmake --build build --parallel
+
+      - name: Run the unit tests
+        run: ctest --test-dir build --output-on-failure
 
       - name: Assemble the app bundle
         run: |
@@ -377,7 +426,9 @@ jobs:
       - name: Deploy the Qt frameworks
         run: |
           set -e
-          "$QT_ROOT_DIR/bin/macdeployqt" "dist/QuteTavern.app" -verbose=1
+          # -qmldir makes macdeployqt scan the QML sources and copy the QML
+          # modules they import (QtQuick.Controls + its styles, QtWebEngine, ...)
+          "$QT_ROOT_DIR/bin/macdeployqt" "dist/QuteTavern.app" -qmldir=qml -verbose=1
 
       - name: Verify the bundle contents
         run: |
@@ -387,8 +438,19 @@ jobs:
           test -f "$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app/Contents/MacOS/QtWebEngineProcess"
           test -f "$APP/Contents/Resources/icudtl.dat" || \
             test -f "$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Resources/icudtl.dat"
-          echo "the WebEngine framework and its helper process are in place"
-          lipo -info "$APP/Contents/MacOS/qutetavern"
+          # the QML modules the UI imports must be inside the bundle as well
+          QMLDIR=$(find "$APP/Contents" -maxdepth 3 -type d -name QtWebEngine -path "*qml*" | head -1)
+          [ -n "$QMLDIR" ] || {
+            echo "::error::the QML modules are missing from the bundle"
+            find "$APP/Contents" -maxdepth 3 -type d | head -30
+            exit 1
+          }
+          for m in QtQuick/Controls QtQuick/Controls/Basic QtQuick/Dialogs QtQuick/Window QtQml; do
+            [ -d "$(dirname "$QMLDIR")/$m" ] || {
+              echo "::error::the QML module $m is missing from the bundle"; exit 1; }
+          done
+          echo "QML modules bundled under $(dirname "$QMLDIR")"
+          echo "the WebEngine framework, its helper process and the QML modules are in place"
 
       - name: Sign (ad-hoc) and verify the signature
         run: |
@@ -419,7 +481,24 @@ jobs:
         run: |
           set -e
           PKG="QuteTavern-${APP_VERSION}-universal.pkg"
-          pkgbuild --component "dist/QuteTavern.app" \
+          # Package a destination root rather than using pkgbuild --component:
+          # pkgbuild --root is the mode that accepts a component property list,
+          # which is how the man page says to control "how the Installer handles
+          # those bundles" in the root (man pkgbuild, COMPONENT PROPERTY LIST).
+          rm -rf pkgroot
+          mkdir -p pkgroot
+          cp -R dist/QuteTavern.app pkgroot/QuteTavern.app
+          # The installation problem this solves: with BundleIsRelocatable left
+          # at its default, the package's PackageInfo carries a
+          # <relocate><bundle id="..."/></relocate> element, and the Installer
+          # answers it by updating a copy of the application found elsewhere on
+          # the target volume instead of installing into /Applications - the
+          # workspace still holds dist/QuteTavern.app and build/qutetavern.app.
+          # The install reports success and /Applications stays empty.
+          pkgbuild --analyze --root pkgroot component.plist
+          /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" component.plist
+          pkgbuild --root pkgroot \
+                   --component-plist component.plist \
                    --install-location /Applications \
                    --identifier io.github.lckhot.qutetavern \
                    --version "${APP_VERSION}" \
@@ -427,12 +506,57 @@ jobs:
           ls -l "$PKG"
           echo "PKG=$PKG" >> "$GITHUB_ENV"
 
+      - name: Inspect the package
+        run: |
+          set -e
+          # The two decisions the packaging itself makes, checked on any machine
+          # without depending on the Installer's runtime behaviour: where the
+          # payload installs, and that it carries the application.
+          rm -rf /tmp/qutetavern-pkg
+          pkgutil --expand "$PKG" /tmp/qutetavern-pkg
+          grep -q 'install-location="/Applications"' /tmp/qutetavern-pkg/PackageInfo || {
+            echo "::error::the package does not install into /Applications"
+            cat /tmp/qutetavern-pkg/PackageInfo
+            exit 1
+          }
+          # A <relocate> element tells the Installer it may update a copy of the
+          # application found elsewhere on the target volume instead of creating
+          # the one the package declares - which is how a successful install can
+          # leave /Applications empty. It comes from BundleIsRelocatable in the
+          # component property list used to build the package.
+          if grep -q "<relocate>" /tmp/qutetavern-pkg/PackageInfo; then
+            echo "::error::the package is marked relocatable, so the installer may not use /Applications"
+            grep -A3 -B1 "<relocate>" /tmp/qutetavern-pkg/PackageInfo
+            exit 1
+          fi
+          # payload entries are listed as "./QuteTavern.app/..." (checked against
+          # packages built with both pkgbuild modes), so the pattern allows the
+          # optional leading "./"
+          bsdtar -tf /tmp/qutetavern-pkg/Payload | grep -qE '^(\./)?QuteTavern\.app/Contents/MacOS/qutetavern$' || {
+            echo "::error::the payload does not contain the application binary"
+            bsdtar -tf /tmp/qutetavern-pkg/Payload | head -20
+            exit 1
+          }
+          echo "the package installs into /Applications and carries the application"
+
       - name: Install and run the packaged app
         run: |
           set -e
-          sudo installer -pkg "$PKG" -target /
+          # The real thing a user does, so the check covers the whole path: the
+          # installer accepts the package, the application lands where the
+          # package declares, and it starts from there.
+          sudo installer -pkg "$PKG" -target / -verbose -dumplog | tail -6
           APP="/Applications/QuteTavern.app"
-          test -d "$APP" || { echo "::error::the package did not install the app"; exit 1; }
+          if [ ! -d "$APP" ]; then
+            echo "::error::the installer did not put the application into /Applications"
+            # the Installer's own record of what it did, including any decision
+            # to update a copy of the application found elsewhere
+            sudo pkgutil --pkg-info io.github.lckhot.qutetavern || true
+            ls -la /Applications | tail -20
+            sudo grep -i -e qutetavern -e relocat /var/log/install.log | tail -20 || true
+            exit 1
+          fi
+          echo "installed at $APP"
           QT_QPA_PLATFORM=offscreen "$APP/Contents/MacOS/qutetavern" >smoke2.log 2>&1 &
           PID=$!
           sleep 10
@@ -445,6 +569,8 @@ jobs:
           echo "the installed app started and stayed alive"
 
       - uses: actions/upload-artifact@v7
+        # see the AppImage job: artifacts are uploaded even if a check failed
+        if: always()
         with:
           name: macos-pkg
           path: QuteTavern-*-universal.pkg
@@ -463,7 +589,7 @@ jobs:
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "version: $VERSION"
 
-      - name: Install Qt (official binaries, 6.2.4)
+      - name: Install Qt (official binaries, ${{ env.QT_VERSION_FLOOR }})
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION_FLOOR }}
@@ -475,15 +601,14 @@ jobs:
           sudo apt-get update
           # - the OpenGL/fontconfig/xkbcommon headers that Qt's CMake
           #   configuration looks for
-          # - the distribution's Qt *runtime* packages: dpkg-shlibdeps reads
-          #   their shlibs data to turn the SONAMEs the binary links into
-          #   Debian package names for the Depends field
+          # - the distribution's Qt packages are deliberately NOT installed: the
+          #   binary is built against the official Qt binaries, the package's
+          #   dependencies are declared explicitly (make-packages.sh) and the
+          #   install/start tests run in containers that provide a Qt at or above
+          #   the floor version
           PACKAGES="build-essential cmake rpm
             libgl1-mesa-dev libfontconfig1-dev libfreetype6-dev
             libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libx11-xcb-dev libxcb1-dev
-            libqt6core6 libqt6gui6 libqt6widgets6 libqt6network6 libqt6opengl6
-            libqt6webenginewidgets6 libqt6webenginecore6 libqt6webenginecore6-bin
-            libqt6webchannel6 libqt6positioning6 qt6-qpa-plugins
             desktop-file-utils file wget"
           INSTALL=""
           for p in $PACKAGES; do
@@ -500,7 +625,7 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
 
-      - name: Run the unit tests (also on the Qt 6.2 floor)
+      - name: Run the unit tests (on the Qt floor)
         run: ctest --test-dir build --output-on-failure
 
       - name: Build the .deb and the .rpm
@@ -508,35 +633,74 @@ jobs:
           bash packaging/linux/make-packages.sh build/qutetavern "${APP_VERSION}" .
           ls -l QuteTavern-${APP_VERSION}-*
 
-      - name: Verify the .deb
+      - name: Inspect the .deb
         run: |
           set -e
           DEB="QuteTavern-${APP_VERSION}-amd64.deb"
           dpkg-deb -I "$DEB"
           DEPENDS="$(dpkg-deb -f "$DEB" Depends)"
           echo "Depends: $DEPENDS"
-          echo "$DEPENDS" | grep -q "libqt6widgets6" \
-            || { echo "::error::the Qt dependency is not declared"; exit 1; }
-          echo "$DEPENDS" | grep -q "webengine" \
-            || { echo "::error::the WebEngine dependency is not declared"; exit 1; }
-          # install it for real, start it once, remove it again
-          sudo dpkg -i "$DEB"
-          test -x /usr/bin/qutetavern
-          # the layout differs per distribution, so the helper is located by name
-          QTPROC=$(find /usr/lib -name QtWebEngineProcess -type f 2>/dev/null | head -1)
-          [ -n "$QTPROC" ] || { echo "::error::the WebEngine runtime is not installed"; exit 1; }
-          echo "WebEngine helper: $QTPROC"
-          set +e
-          QT_QPA_PLATFORM=offscreen timeout 12 /usr/bin/qutetavern >deb-run.log 2>&1
-          rc=$?
-          set -e
-          cat deb-run.log
-          if [ "$rc" != "124" ]; then
-            echo "::error::the installed application did not stay alive (exit code $rc)"
+          # the QML UI links Qt Quick / WebEngine Quick, and the QML modules are
+          # loaded at runtime, so they cannot be inferred from the shared libraries
+          for p in libqt6quick6 libqt6qml6 libqt6quickcontrols2-6 libqt6webenginequick6; do
+            echo "$DEPENDS" | grep -q "$p" \
+              || { echo "::error::$p is not declared in Depends"; exit 1; }
+          done
+          # Every Qt module the UI imports needs its corresponding qml6-module-*
+          # package, and nothing else can be relied on to pull it in (Debian's
+          # qml6-module-qtquick-controls, for instance, does not depend on
+          # qtquick-dialogs). The list is therefore derived from the import
+          # statements themselves, so adding an import without declaring its
+          # package fails here.
+          IMPORTS=$(grep -h '^import ' qml/*.qml | awk '{print $2}' | grep -vx QuteTavern | sort -u)
+          echo "QML imports: $(echo $IMPORTS)"
+          echo "$IMPORTS" > qml-imports.txt
+          for m in $IMPORTS; do
+            p="qml6-module-$(echo "$m" | tr 'A-Z.' 'a-z-')"
+            echo "$DEPENDS" | grep -q "$p" \
+              || { echo "::error::$m is imported by the UI but $p is not in Depends"; exit 1; }
+          done
+          if echo "$DEPENDS" | grep -q "libqt6widgets6"; then
+            echo "::error::the package still depends on Qt Widgets"
             exit 1
           fi
-          sudo dpkg -r qutetavern
-          echo "the .deb installs, starts and uninstalls cleanly"
+          echo "Depends declares the Qt libraries and the QML modules the UI imports"
+
+      - name: Install and start the .deb in a clean Debian container
+        run: |
+          set -e
+          # what a Debian user does: apt installs the package and pulls Qt and the
+          # QML modules from the distribution (trixie ships Qt 6.8, above the floor)
+          docker run --rm -v "$PWD:/src" -w /src debian:trixie-slim bash -euc '
+            apt-get update
+            apt-get -y install --no-install-recommends ./QuteTavern-*.deb
+            test -x /usr/bin/qutetavern
+            # the WebEngine runtime and the QML modules must come in through the
+            # dependencies - the layout differs per distribution, so search
+            QTPROC=$(find /usr/lib -name QtWebEngineProcess -type f 2>/dev/null | head -1)
+            [ -n "$QTPROC" ] || { echo "the Qt WebEngine runtime is missing"; exit 1; }
+            echo "WebEngine helper: $QTPROC"
+            QMLROOT=$(find /usr/lib -maxdepth 4 -type d -name QtWebEngine -path "*qml*" | head -1)
+            [ -n "$QMLROOT" ] || { echo "the QtWebEngine QML module is missing"; exit 1; }
+            QMLBASE=$(dirname "$QMLROOT")
+            # every module the UI imports, derived from the import statements in
+            # the previous step: apt has to have brought all of them in
+            while read -r m; do
+              d=$(echo "$m" | tr '.' '/')
+              test -f "$QMLBASE/$d/qmldir" || {
+                echo "the QML module $m is missing ($QMLBASE/$d/qmldir)"; exit 1; }
+            done < /src/qml-imports.txt
+            echo "QML modules: $QMLBASE"
+            set +e
+            QT_QPA_PLATFORM=offscreen timeout 12 qutetavern >run.log 2>&1
+            rc=$?
+            set -e
+            cat run.log
+            [ "$rc" = 124 ] || {
+              echo "the installed application did not stay alive (exit code $rc)"; exit 1; }
+            apt-get -y remove qutetavern
+            echo "the .deb installs, starts and uninstalls cleanly"
+          '
 
       - name: Inspect the .rpm
         run: |
@@ -545,10 +709,19 @@ jobs:
           rpm -qpi "$RPM"
           echo "--- requirements declared by the package ---"
           rpm -qpR "$RPM" | sort -u
-          rpm -qpR "$RPM" | grep -q "libQt6Widgets.so.6" \
-            || { echo "::error::the Qt dependency is not declared"; exit 1; }
-          rpm -qpR "$RPM" | grep -q "libQt6WebEngineWidgets.so.6" \
-            || { echo "::error::the WebEngine dependency is not declared"; exit 1; }
+          rpm -qpR "$RPM" | grep -q "libQt6Qml.so.6" \
+            || { echo "::error::the Qt QML dependency is not declared"; exit 1; }
+          rpm -qpR "$RPM" | grep -q "libQt6WebEngineQuick.so.6" \
+            || { echo "::error::the WebEngine Quick dependency is not declared"; exit 1; }
+          # libQt6Quick.so.6 is deliberately not asserted: the QML engine loads
+          # Qt Quick at runtime, nothing references its symbols, so the linker
+          # drops the dependency. libQt6Qml.so.6 is what carries it in: on
+          # Fedora that SONAME comes from qt6-qtdeclarative, the package that
+          # also ships the QtQuick QML modules.
+          if rpm -qpR "$RPM" | grep -q "libQt6Widgets.so.6"; then
+            echo "::error::the package still depends on Qt Widgets"
+            exit 1
+          fi
 
       - name: Install and start the .rpm in a clean Fedora container
         run: |
@@ -561,6 +734,15 @@ jobs:
             # the WebEngine runtime must be pulled in through the dependencies
             test -e /usr/lib64/qt6/libexec/QtWebEngineProcess || {
               echo "the Qt WebEngine runtime is missing"; exit 1; }
+            # ... and so must the QML modules, which the QML engine loads at
+            # runtime: they are invisible to the shared library dependencies. The
+            # list comes from the import statements, derived in the .deb step.
+            while read -r m; do
+              d=$(echo "$m" | tr '.' '/')
+              test -f "/usr/lib64/qt6/qml/$d/qmldir" || {
+                echo "the QML module $m is missing"; exit 1; }
+            done < /src/qml-imports.txt
+            echo "the QML modules are installed"
             set +e
             QT_QPA_PLATFORM=offscreen timeout 12 qutetavern >run.log 2>&1
             rc=$?
@@ -573,6 +755,8 @@ jobs:
           '
 
       - uses: actions/upload-artifact@v7
+        # see the AppImage job: artifacts are uploaded even if a check failed
+        if: always()
         with:
           name: linux-packages
           path: |

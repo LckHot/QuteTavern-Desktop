@@ -13,7 +13,7 @@ macOS alike.
 ## Architecture
 
 ```
-+-- Management window (Qt Widgets, always present) --------------+
++-- Management window (Qt Quick/QML, always present) -------------+
 |  Bind / change directory . Install a new copy from GitHub      |
 |  Start/stop . Status . Live backend log panel                  |
 |  Check for updates . Data directory . Preferences              |
@@ -31,8 +31,13 @@ macOS alike.
 
 ## Features
 
-- **Management window (native Qt Widgets)**: starts instantly; native title bar
+- **Management window (Qt Quick/QML)**: starts instantly; native title bar
   and global menu integration on KDE
+- **Page fullscreen**: when the front end (or a character card extension) asks
+  for fullscreen, the element fills the ST window; Escape leaves it again. The
+  launcher never puts the window into a system fullscreen state, so the window
+  keeps its size and the input method keeps working. A real borderless fullscreen
+  is still one compositor shortcut away
 - **Install from GitHub**: pick a parent directory, clone the release branch,
   check out the latest tag, run npm install, bind automatically
 - **Separate ST window (Chromium engine)**: closing it does not stop the
@@ -52,6 +57,10 @@ macOS alike.
   termination are adapted per platform)
 
 ## Building
+
+Requirements: Qt 6.5 or newer with the **Quick**, **Quick Controls 2** and
+**WebEngine** modules (the UI layer is QML; Qt 6.5 is the floor because it is
+the first release with `QQmlApplicationEngine::loadFromModule`).
 
 Linux dependencies (Fedora):
 
@@ -91,24 +100,24 @@ if every platform passes - and on pull requests, so one release never builds the
 same tree twice. Plain pushes to main do not start a build.
 
 The AppImage carries its own current Qt. The `.deb` and the `.rpm` come from one
-build on Ubuntu 22.04, linked against its Qt 6.2 (the oldest Qt 6 with a complete
-WebEngine), and declare the distribution's Qt as a dependency instead of
-bundling it - so Qt updates arrive through the system package manager.
+build, linked against the official Qt 6.5 binaries (the floor the QML UI needs),
+and declare the distribution's Qt libraries **and QML modules** as dependencies
+instead of bundling them - so Qt updates arrive through the system package
+manager.
 
-## Distribution support
+## Runtime requirements
 
-| Package | Requirements | Runs on |
+| Package | Recommended system | Qt and glibc |
 | --- | --- | --- |
-| `.deb` | Qt 6.2+, glibc 2.35+ | Ubuntu 22.04 LTS and newer, Debian 12 and newer |
-| `.rpm` | Qt 6.2+, glibc 2.35+ | Fedora 36 and newer, RHEL 10 and newer, openSUSE Leap 15.6 and newer |
-| `.AppImage` | glibc 2.35+, no system Qt | any distribution meeting the glibc floor (Fedora 36+, Ubuntu 22.04+, Debian 12+, …) |
-| Windows installer | - | Windows 10 1803 or newer |
-| macOS package | - | macOS 12 or newer, Intel and Apple silicon |
+| `.deb` | Debian 13 or newer, Ubuntu 25.04 or newer | the system's Qt 6.5+, glibc 2.35+ |
+| `.rpm` | Fedora 40 or newer, RHEL 10 or newer | the system's Qt 6.5+, glibc 2.35+ |
+| `.AppImage` | any x86_64 Linux | its own Qt, glibc 2.35+ |
+| Windows installer | Windows 10 1803 or newer | bundled |
+| macOS package | macOS 12 or newer, Intel and Apple silicon | bundled |
 
-Those floors are not assumptions: CI builds and installs the `.deb` on Ubuntu
-22.04, and installs, starts and removes the `.rpm` inside a Fedora container, so
-the oldest supported release is a tested configuration. RHEL 9 is deliberately
-not covered - it ships glibc 2.34, below what the build requires.
+If the system's Qt is older than 6.5 - as on Ubuntu 22.04 and 24.04 or Debian 12
+- use the AppImage: it carries its own Qt and QML runtime and only asks the
+system for glibc 2.35 or newer.
 
 ## Window semantics
 
@@ -146,19 +155,22 @@ from running `node server.js` (standalone mode) inside the repository.
   (`PR_SET_PDEATHSIG` -> SIGTERM); Windows uses a Job Object
   (`KILL_ON_JOB_CLOSE`). macOS has no equivalent, so force-killing the
   launcher leaves the backend running there
+- The AppImage runs Qt WebEngine with the Chromium sandbox disabled: the sandbox
+  needs a setuid helper, which cannot exist inside a read-only AppImage, and
+  unprivileged user namespaces are restricted on several distributions. The
+  `.deb` and `.rpm` builds keep the sandbox enabled.
 
 ## Runtime requirements
 
-The launcher needs `node` (>= 20, the floor SillyTavern declares in its
-`engines` field; the portable download always fetches the latest release) and
-`git` at runtime. Commands are resolved
+The launcher needs `node` (>= 22; the portable download always fetches the
+latest LTS release) and `git` at runtime. Commands are resolved
 from the environment the launcher was started with; if that fails, the PATH of
 your login shell is consulted once (so installations set up in shell startup
 files - Homebrew, nvm, custom directories - work even when the launcher is
 started from the desktop menu). Nothing is written to your system, and commands
 that already resolve keep their priority. Missing components can
 be downloaded as portable copies into the launcher's application data directory
-(the latest Node.js release, and MinGit on Windows); they never modify the system
+(the latest Node.js LTS release, and MinGit on Windows); they never modify the system
 environment - system components always take priority. On macOS git comes with
 the Xcode command line tools (`xcode-select --install`), on Linux it has to be
 installed from the distribution.
@@ -170,7 +182,8 @@ The QuteTavern is free software licensed under the
 same license the SillyTavern project uses, from which the application icon
 originates; every file carries an `SPDX-License-Identifier` tag.
 
-- Qt 6 (Widgets, WebEngine) is used under LGPL-3.0 and shipped unmodified; the
+- Qt 6 (Core, Gui, Network, Qml, Quick, Quick Controls 2, WebEngine) is used
+  under LGPL-3.0 and shipped unmodified; the
   required notices and the replacement options are listed in
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - SillyTavern itself is only started as a child process and is never modified.
