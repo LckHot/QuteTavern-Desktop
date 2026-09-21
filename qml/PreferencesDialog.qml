@@ -27,7 +27,6 @@ Dialog {
         rootField.text = App.stRoot
         argsField.text = App.extraBackendArgs
         maxCheck.checked = App.stAutoMaximize
-        rememberCheck.checked = App.stRememberWindowState
         saveError = ""
         validateTimer.restart()
     }
@@ -85,10 +84,6 @@ Dialog {
             id: maxCheck
             text: qsTr("Maximize the ST window when it opens")
         }
-        CheckBox {
-            id: rememberCheck
-            text: qsTr("Remember the ST window size and position")
-        }
 
         Label {
             Layout.fillWidth: true
@@ -114,7 +109,7 @@ Dialog {
             enabled: dialog.check.ok
             onClicked: {
                 const error = App.saveSettings(rootField.text, argsField.text,
-                                               maxCheck.checked, rememberCheck.checked)
+                                               maxCheck.checked)
                 if (error.length > 0) {
                     dialog.saveError = error
                     return

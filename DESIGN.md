@@ -215,7 +215,7 @@ findable - detection would succeed while starting the backend failed.
   (`status --porcelain -uno`, untracked files do not block) → checkout tag →
   npm install.
 - **Settings** (`<AppConfigLocation>/config.json`): `st_root`,
-  `extra_backend_args`, `auto_maximize`, `remember_window_state`,
+  `extra_backend_args`, `auto_maximize`,
   `window_state{x,y,w,h}`. Missing fields are tolerated; saving preserves the
   `window_state` that is not part of the form; on Linux a configuration file
   written by earlier launcher builds is picked up as a fallback.

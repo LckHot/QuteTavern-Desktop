@@ -112,7 +112,7 @@ EnvCheck::EnvCheck(QObject *parent)
         m_canDownload = false;
         m_status = QStringLiteral(
                        "There is no official Node.js binary for this CPU architecture (%1).\n"
-                       "Please quit and install Node.js (>= 20) and git manually, "
+                       "Please quit and install Node.js (>= 22) and git manually, "
                        "then start the app again.")
                        .arg(cpu);
     }
@@ -200,12 +200,18 @@ void EnvCheck::fetchNodeVersion()
             return;
         if (r->error() == QNetworkReply::NoError) {
             const auto arr = QJsonDocument::fromJson(r->readAll()).array();
-            // index.json is sorted newest first, so the first entry is the
-            // latest release (Node 20 and older are end of life)
+            // index.json is sorted newest first and marks LTS releases with a
+            // codename in "lts" (false on current releases): take the newest LTS
             if (!arr.isEmpty()) {
-                const QString latest = arr.first().toObject().value("version").toString();
-                if (!latest.isEmpty())
-                    m_nodeVersion = latest;
+                for (const QJsonValue &entry : arr) {
+                    const QJsonObject obj = entry.toObject();
+                    if (obj.value("lts").isString()) {
+                        m_nodeVersion = obj.value("version").toString();
+                        break;
+                    }
+                }
+                if (m_nodeVersion.isEmpty())
+                    m_nodeVersion = arr.first().toObject().value("version").toString();
             }
         }
         setStatus(QStringLiteral("Downloading Node.js %1 (%2)...").arg(m_nodeVersion, m_arch));
@@ -241,7 +247,7 @@ void EnvCheck::fetchNodeVersion()
                     setStatus(QStringLiteral(
                         "The extracted archive does not contain a node executable "
                         "(unexpected layout).\n"
-                        "You can quit and install Node.js (>= 20) manually."));
+                        "You can quit and install Node.js (>= 22) manually."));
                     m_exitLabel = QStringLiteral("Close");
                     setBusy(false);
                     emit changed();

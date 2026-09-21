@@ -53,7 +53,6 @@ class AppController : public QObject {
     Q_PROPERTY(bool stWindowVisible READ stWindowVisible NOTIFY changed)
     Q_PROPERTY(QString stUrl READ stUrl NOTIFY changed)
     Q_PROPERTY(bool stAutoMaximize READ stAutoMaximize NOTIFY changed)
-    Q_PROPERTY(bool stRememberWindowState READ stRememberWindowState NOTIFY changed)
     Q_PROPERTY(QVariantMap stNormalGeometry READ stNormalGeometry NOTIFY changed)
 
     // Foreign instance dialog
@@ -102,7 +101,6 @@ public:
     bool stWindowVisible() const;
     QString stUrl() const;
     bool stAutoMaximize() const;
-    bool stRememberWindowState() const;
     QVariantMap stNormalGeometry() const;
 
     bool foreignVisible() const { return m_foreignVisible; }
@@ -124,7 +122,7 @@ public:
     Q_INVOKABLE QVariantMap validateRoot(const QString &path) const;
     Q_INVOKABLE QString bindRoot(const QString &path); // empty = success
     Q_INVOKABLE QString saveSettings(const QString &root, const QString &extraArgs,
-                                     bool autoMaximize, bool rememberWindowState);
+                                     bool autoMaximize);
     // QML dialogs hand over file:// URLs; the settings and the backend want paths
     Q_INVOKABLE QString fromUrl(const QUrl &url) const;
     Q_INVOKABLE void showMessage(const QString &title, const QString &text, bool warning);

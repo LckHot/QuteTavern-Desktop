@@ -15,7 +15,9 @@ endif()
 
 # The UI layer is Qt Quick (QML); the logic layer (Backend/Installer/Updater/
 # Util/Settings/EnvCheck) is plain C++ and never touches QtWidgets.
-find_package(Qt6 REQUIRED COMPONENTS Gui Quick QuickControls2 WebEngineQuick Network)
+# 6.5 is the floor: QQmlApplicationEngine::loadFromModule (main.cpp) and the
+# QTP0001 policy used below were both introduced in Qt 6.5.
+find_package(Qt6 6.5 REQUIRED COMPONENTS Gui Quick QuickControls2 WebEngineQuick Network)
 
 qt_add_executable(qutetavern
     src/main.cpp

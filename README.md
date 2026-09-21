@@ -155,19 +155,22 @@ from running `node server.js` (standalone mode) inside the repository.
   (`PR_SET_PDEATHSIG` -> SIGTERM); Windows uses a Job Object
   (`KILL_ON_JOB_CLOSE`). macOS has no equivalent, so force-killing the
   launcher leaves the backend running there
+- The AppImage runs Qt WebEngine with the Chromium sandbox disabled: the sandbox
+  needs a setuid helper, which cannot exist inside a read-only AppImage, and
+  unprivileged user namespaces are restricted on several distributions. The
+  `.deb` and `.rpm` builds keep the sandbox enabled.
 
 ## Runtime requirements
 
-The launcher needs `node` (>= 20, the floor SillyTavern declares in its
-`engines` field; the portable download always fetches the latest release) and
-`git` at runtime. Commands are resolved
+The launcher needs `node` (>= 22; the portable download always fetches the
+latest LTS release) and `git` at runtime. Commands are resolved
 from the environment the launcher was started with; if that fails, the PATH of
 your login shell is consulted once (so installations set up in shell startup
 files - Homebrew, nvm, custom directories - work even when the launcher is
 started from the desktop menu). Nothing is written to your system, and commands
 that already resolve keep their priority. Missing components can
 be downloaded as portable copies into the launcher's application data directory
-(the latest Node.js release, and MinGit on Windows); they never modify the system
+(the latest Node.js LTS release, and MinGit on Windows); they never modify the system
 environment - system components always take priority. On macOS git comes with
 the Xcode command line tools (`xcode-select --install`), on Linux it has to be
 installed from the distribution.

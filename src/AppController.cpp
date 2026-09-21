@@ -80,11 +80,6 @@ bool AppController::stAutoMaximize() const
     return m_settings->autoMaximize;
 }
 
-bool AppController::stRememberWindowState() const
-{
-    return m_settings->rememberWindowState;
-}
-
 // The size the ST window must fall back to when it is neither maximized nor
 // fullscreen. Seeding it before the window is first maximized/fullscreened is
 // what keeps the platform from restoring a "normal size" the window never had
@@ -130,7 +125,7 @@ QString AppController::bindRoot(const QString &path)
 }
 
 QString AppController::saveSettings(const QString &root, const QString &extraArgs,
-                                    bool autoMaximize, bool rememberWindowState)
+                                    bool autoMaximize)
 {
     const QString trimmed = root.trimmed();
     const auto check = Util::validateRoot(trimmed);
@@ -139,7 +134,6 @@ QString AppController::saveSettings(const QString &root, const QString &extraArg
     m_settings->stRoot = trimmed;
     m_settings->extraBackendArgs = extraArgs.split(' ', Qt::SkipEmptyParts);
     m_settings->autoMaximize = autoMaximize;
-    m_settings->rememberWindowState = rememberWindowState;
     m_settings->save();
     refreshAll();
     return QString();
@@ -211,7 +205,7 @@ void AppController::saveStWindowGeometry(int x, int y, int w, int h, bool maximi
     // back, or the next launch would open maximized-sized but un-maximized.
     // (The window is never put into a platform fullscreen state, so there is no
     // fullscreen geometry to guard against.)
-    if (!m_settings->rememberWindowState || maximized)
+    if (maximized)
         return;
     if (w <= 0 || h <= 0)
         return;

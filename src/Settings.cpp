@@ -43,7 +43,6 @@ Settings Settings::load()
     for (const auto &v : args)
         s.extraBackendArgs << v.toString();
     s.autoMaximize = obj.value("auto_maximize").toBool(true);
-    s.rememberWindowState = obj.value("remember_window_state").toBool(true);
     const auto ws = obj.value("window_state").toObject();
     if (!ws.isEmpty()) {
         s.hasWindowState = true;
@@ -73,7 +72,6 @@ bool Settings::save() const
         args.append(a);
     obj["extra_backend_args"] = args;
     obj["auto_maximize"] = autoMaximize;
-    obj["remember_window_state"] = rememberWindowState;
     obj["window_state"] = hasWindowState ? ws : QJsonValue();
 
     QFile f(path);

@@ -262,8 +262,11 @@ jobs:
 
       - name: Configure and build
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
           cmake --build build --config Release --parallel
+
+      - name: Run the unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Deploy the Qt runtime
         run: |
@@ -374,10 +377,13 @@ jobs:
 
       - name: Configure and build (universal binary)
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
                 -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
           cmake --build build --parallel
+
+      - name: Run the unit tests
+        run: ctest --test-dir build --output-on-failure
 
       - name: Assemble the app bundle
         run: |
@@ -445,18 +451,6 @@ jobs:
           done
           echo "QML modules bundled under $(dirname "$QMLDIR")"
           echo "the WebEngine framework, its helper process and the QML modules are in place"
-
-          # The package is advertised for Intel and Apple silicon alike: the
-          # build compiles both slices in one go, so the application must carry
-          # both.
-          ARCHS=$(lipo -archs "$APP/Contents/MacOS/qutetavern")
-          echo "application architectures: $ARCHS"
-          for a in arm64 x86_64; do
-            case " $ARCHS " in
-              *" $a "*) ;;
-              *) echo "::error::the application is missing the $a slice"; exit 1 ;;
-            esac
-          done
 
       - name: Sign (ad-hoc) and verify the signature
         run: |

@@ -248,7 +248,7 @@ void Backend::startNpmInstall()
     if (npm.isEmpty()) {
         m_npm->deleteLater();
         m_npm = nullptr;
-        setError(QStringLiteral("npm executable not found. Please make sure Node.js (>= 20) "
+        setError(QStringLiteral("npm executable not found. Please make sure Node.js (>= 22) "
                                 "is installed and on PATH."),
                  true);
         return;
@@ -352,7 +352,7 @@ void Backend::spawnNode()
     // built-in components we append to the child environment.
     const QString node = Util::findCommand(QStringLiteral("node"));
     if (node.isEmpty()) {
-        setError(QStringLiteral("node executable not found. Please make sure Node.js (>= 20) "
+        setError(QStringLiteral("node executable not found. Please make sure Node.js (>= 22) "
                                 "is installed and on PATH."),
                  false);
         return;
@@ -488,7 +488,7 @@ void Backend::onProcError(QProcess::ProcessError e)
     }
     if (m_status != Status::Starting)
         return;
-    setError(QStringLiteral("node executable not found. Please make sure Node.js (>= 20) "
+    setError(QStringLiteral("node executable not found. Please make sure Node.js (>= 22) "
                             "is installed and on PATH."),
              false);
 }
