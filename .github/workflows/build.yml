@@ -518,37 +518,42 @@ jobs:
           ls -l "$PKG"
           echo "PKG=$PKG" >> "$GITHUB_ENV"
 
+      - name: Inspect the package
+        run: |
+          set -e
+          # The two decisions the packaging itself makes, checked on any machine
+          # without depending on the Installer's runtime behaviour: where the
+          # payload installs, and that it carries the application.
+          rm -rf /tmp/qutetavern-pkg
+          pkgutil --expand "$PKG" /tmp/qutetavern-pkg
+          grep -q 'install-location="/Applications"' /tmp/qutetavern-pkg/PackageInfo || {
+            echo "::error::the package does not install into /Applications"
+            cat /tmp/qutetavern-pkg/PackageInfo
+            exit 1
+          }
+          bsdtar -tf /tmp/qutetavern-pkg/Payload > payload.txt
+          grep -qx "QuteTavern.app/Contents/MacOS/qutetavern" payload.txt || {
+            echo "::error::the payload does not contain the application binary"
+            head -20 payload.txt
+            exit 1
+          }
+          echo "the package installs into /Applications and carries $(wc -l < payload.txt) payload entries"
+
       - name: Install and run the packaged app
         run: |
           set -e
-          # Install into a fresh, empty volume rather than the runner's own
-          # /Applications. The Installer framework *relocates* a bundle
-          # component: when it finds a copy of the same application (matching
-          # CFBundleIdentifier) on the target volume, that copy is updated
-          # instead - and this workspace still holds dist/QuteTavern.app and
-          # build/qutetavern.app. Installer still reports success in that case,
-          # so the application simply never appears in /Applications. A pristine
-          # volume holds no such copy.
-          IMG=/tmp/qutetavern-test.dmg
-          MNTPOINT=/tmp/qutetavern-mnt
-          rm -f "$IMG"
-          rm -rf "$MNTPOINT"
-          mkdir -p "$MNTPOINT"
-          hdiutil create -size 2g -fs HFS+ -volname QuteTavernTest "$IMG" >/dev/null
-          # -mountpoint removes the need to parse hdiutil's output for the mount
-          # path (and a path that silently came out empty made `installer` fail
-          # with "Error trying to locate volume")
-          hdiutil attach -nobrowse -mountpoint "$MNTPOINT" "$IMG" >/dev/null
-          mount | grep -q "on $MNTPOINT " || {
-            echo "::error::the test volume did not mount"; exit 1; }
-          echo "install target: $MNTPOINT"
-          LOG=$(sudo installer -pkg "$PKG" -target "$MNTPOINT" -verbose 2>&1 | tail -8)
-          printf '%s\n' "$LOG"
-          APP="$MNTPOINT/Applications/QuteTavern.app"
+          # The real thing a user does, so the check covers the whole path: the
+          # installer accepts the package, the application lands where the
+          # package declares, and it starts from there.
+          sudo installer -pkg "$PKG" -target / -verbose -dumplog | tail -6
+          APP="/Applications/QuteTavern.app"
           if [ ! -d "$APP" ]; then
-            echo "::error::the package did not install the app"
-            echo "::warning::installer said: $(printf '%s' "$LOG" | tail -4 | tr '\n' '|')"
-            echo "::warning::volume holds: $(ls -1 "$MNTPOINT" | tr '\n' ' ')"
+            echo "::error::the installer did not put the application into /Applications"
+            # the Installer's own record of what it did, including any decision
+            # to update a copy of the application found elsewhere
+            sudo pkgutil --pkg-info io.github.lckhot.qutetavern || true
+            ls -la /Applications | tail -20
+            sudo grep -i -e qutetavern -e relocat /var/log/install.log | tail -20 || true
             exit 1
           fi
           echo "installed at $APP"
@@ -564,7 +569,6 @@ jobs:
           fi
           kill "$PID" || true
           echo "the installed app started and stayed alive"
-          hdiutil detach "$MNTPOINT" >/dev/null 2>&1 || true
 
       - uses: actions/upload-artifact@v7
         # see the AppImage job: artifacts are uploaded even if a check failed
