@@ -535,7 +535,10 @@ jobs:
             grep -A3 -B1 "<relocate>" /tmp/qutetavern-pkg/PackageInfo
             exit 1
           fi
-          bsdtar -tf /tmp/qutetavern-pkg/Payload | grep -qx "QuteTavern.app/Contents/MacOS/qutetavern" || {
+          # payload entries are listed as "./QuteTavern.app/..." (checked against
+          # packages built with both pkgbuild modes), so the pattern allows the
+          # optional leading "./"
+          bsdtar -tf /tmp/qutetavern-pkg/Payload | grep -qE '^(\./)?QuteTavern\.app/Contents/MacOS/qutetavern$' || {
             echo "::error::the payload does not contain the application binary"
             bsdtar -tf /tmp/qutetavern-pkg/Payload | head -20
             exit 1
