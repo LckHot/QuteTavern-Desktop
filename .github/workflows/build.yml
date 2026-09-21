@@ -495,18 +495,26 @@ jobs:
           # build/qutetavern.app. Installer still reports success in that case,
           # so the application simply never appears in /Applications. A pristine
           # volume holds no such copy.
-          hdiutil create -size 2g -fs HFS+ -volname QuteTavernTest \
-                         -type SPARSE /tmp/qutetavern-test.dmg >/dev/null
-          MOUNT=$(hdiutil attach /tmp/qutetavern-test.dmg | grep -o '/Volumes/.*' | head -1)
-          echo "install target: $MOUNT"
-          LOG=$(sudo installer -pkg "$PKG" -target "$MOUNT" -verbose 2>&1 | tail -8)
+          IMG=/tmp/qutetavern-test.dmg
+          MNTPOINT=/tmp/qutetavern-mnt
+          rm -f "$IMG"
+          rm -rf "$MNTPOINT"
+          mkdir -p "$MNTPOINT"
+          hdiutil create -size 2g -fs HFS+ -volname QuteTavernTest "$IMG" >/dev/null
+          # -mountpoint removes the need to parse hdiutil's output for the mount
+          # path (and a path that silently came out empty made `installer` fail
+          # with "Error trying to locate volume")
+          hdiutil attach -nobrowse -mountpoint "$MNTPOINT" "$IMG" >/dev/null
+          mount | grep -q "on $MNTPOINT " || {
+            echo "::error::the test volume did not mount"; exit 1; }
+          echo "install target: $MNTPOINT"
+          LOG=$(sudo installer -pkg "$PKG" -target "$MNTPOINT" -verbose 2>&1 | tail -8)
           printf '%s\n' "$LOG"
-          APP="$MOUNT/Applications/QuteTavern.app"
+          APP="$MNTPOINT/Applications/QuteTavern.app"
           if [ ! -d "$APP" ]; then
             echo "::error::the package did not install the app"
             echo "::warning::installer said: $(printf '%s' "$LOG" | tail -4 | tr '\n' '|')"
-            echo "::warning::volume holds: $(ls -1 "$MOUNT" | tr '\n' ' ')"
-            echo "::warning::package payload: $(pkgutil --volume "$MOUNT" --files io.github.lckhot.qutetavern 2>/dev/null | head -4 | tr '\n' ' ')"
+            echo "::warning::volume holds: $(ls -1 "$MNTPOINT" | tr '\n' ' ')"
             exit 1
           fi
           echo "installed at $APP"
@@ -520,7 +528,7 @@ jobs:
           fi
           kill "$PID" || true
           echo "the installed app started and stayed alive"
-          hdiutil detach "$MOUNT" >/dev/null 2>&1 || true
+          hdiutil detach "$MNTPOINT" >/dev/null 2>&1 || true
 
       - uses: actions/upload-artifact@v7
         # see the AppImage job: artifacts are uploaded even if a check failed
