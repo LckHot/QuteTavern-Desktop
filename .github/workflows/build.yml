@@ -487,20 +487,24 @@ jobs:
         run: |
           set -e
           PKG="QuteTavern-${APP_VERSION}-universal.pkg"
-          # Stage the bundle under a root directory and package that instead of
-          # using pkgbuild --component. The component form marks the bundle as
-          # relocatable: the package's PackageInfo then carries
-          # <relocate><bundle id="..."/></relocate>, and the Installer answers
-          # that by updating a copy of the application it finds on the target
-          # volume instead of creating /Applications/QuteTavern.app - the
-          # workspace still holds dist/QuteTavern.app and build/qutetavern.app.
-          # The install reports success and the application is simply not where
-          # the package says it goes. "Inspect the package" below asserts that
-          # the package we built carries no such instruction.
+          # Package a destination root rather than using pkgbuild --component:
+          # pkgbuild --root is the mode that accepts a component property list,
+          # which is how the man page says to control "how the Installer handles
+          # those bundles" in the root (man pkgbuild, COMPONENT PROPERTY LIST).
           rm -rf pkgroot
           mkdir -p pkgroot
           cp -R dist/QuteTavern.app pkgroot/QuteTavern.app
+          # The installation problem this solves: with BundleIsRelocatable left
+          # at its default, the package's PackageInfo carries a
+          # <relocate><bundle id="..."/></relocate> element, and the Installer
+          # answers it by updating a copy of the application found elsewhere on
+          # the target volume instead of installing into /Applications - the
+          # workspace still holds dist/QuteTavern.app and build/qutetavern.app.
+          # The install reports success and /Applications stays empty.
+          pkgbuild --analyze --root pkgroot component.plist
+          /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" component.plist
           pkgbuild --root pkgroot \
+                   --component-plist component.plist \
                    --install-location /Applications \
                    --identifier io.github.lckhot.qutetavern \
                    --version "${APP_VERSION}" \
@@ -524,9 +528,11 @@ jobs:
           # A <relocate> element tells the Installer it may update a copy of the
           # application found elsewhere on the target volume instead of creating
           # the one the package declares - which is how a successful install can
-          # leave /Applications empty.
+          # leave /Applications empty. It comes from BundleIsRelocatable in the
+          # component property list used to build the package.
           if grep -q "<relocate>" /tmp/qutetavern-pkg/PackageInfo; then
             echo "::error::the package is marked relocatable, so the installer may not use /Applications"
+            grep -A3 -B1 "<relocate>" /tmp/qutetavern-pkg/PackageInfo
             exit 1
           fi
           bsdtar -tf /tmp/qutetavern-pkg/Payload | grep -qx "QuteTavern.app/Contents/MacOS/qutetavern" || {
