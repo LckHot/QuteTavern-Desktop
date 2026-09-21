@@ -102,14 +102,18 @@ if command -v rpmbuild >/dev/null 2>&1; then
     # makes that possible), so it is excluded explicitly
     tar -C "$ROOT" --exclude="DEBIAN" -czf "$RPMTOP/SOURCES/payload.tar.gz" .
 
-    # No manual Requires: rpm's dependency generator records the SONAMEs of
-    # every library the binary links (libQt6Quick.so.6, libQt6Qml.so.6,
-    # libQt6WebEngineQuick.so.6, ...). On Fedora the packages providing those
-    # libraries (qt6-qtdeclarative, qt6-qtwebengine) also carry the QML modules
-    # under /usr/lib64/qt6/qml, so both the libraries and the modules arrive
-    # through the same dependencies - which keeps the package usable on Fedora,
-    # RHEL and openSUSE alike. The CI verifies this by checking that the QML
-    # directories exist after `dnf install` in a clean Fedora container.
+    # No manual Requires: rpm's dependency generator records the SONAMEs of the
+    # libraries the binary actually links. That is libQt6Qml.so.6 and
+    # libQt6WebEngineQuick.so.6 - not libQt6Quick.so.6, because Qt Quick is
+    # loaded by the QML engine at runtime and the linker drops the dependency
+    # (nothing references its symbols directly). On Fedora, libQt6Qml.so.6 and
+    # libQt6WebEngineQuick.so.6 come from qt6-qtdeclarative and
+    # qt6-qtwebengine, the very packages that also carry the QML modules under
+    # /usr/lib64/qt6/qml - so both the libraries and the modules arrive through
+    # the same dependencies, which keeps the package usable on Fedora, RHEL and
+    # openSUSE alike. CI verifies the outcome, not the mechanism: it checks that
+    # the Qt libraries and the QML directories exist after `dnf install` in a
+    # clean Fedora container.
     cat > "$RPMTOP/SPECS/qutetavern.spec" <<EOF
 Name:      qutetavern
 Version:   $VERSION

@@ -21,11 +21,18 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Qt for the AppImage and the Windows/macOS packages. These bundles carry
-  # their own Qt, so nothing constrains the choice except being current: the
-  # newest stable patch release also carries the newest Chromium security fixes
-  # (the AppImage is the way an older distribution gets a working QML UI).
+  # Qt for the AppImage and the macOS package. These bundles carry their own Qt,
+  # so nothing constrains the choice except being current: the newest stable
+  # patch release also carries the newest Chromium security fixes (the AppImage
+  # is the way an older distribution gets a working QML UI).
   QT_VERSION: '6.11.2'
+  # Qt for the Windows installer, pinned separately on purpose: Qt 6.11
+  # publishes the Windows packages in per-compiler repositories
+  # (qt6_6112_msvc2022_64/ instead of qt6_6112/), which aqtinstall cannot read
+  # yet - not even its newest release - so install-qt-action@v4 fails to find
+  # the version. 6.10.3 is the newest release that installs; raise this to
+  # 6.11.x (and drop the variable) once aqtinstall understands the new layout.
+  QT_VERSION_WINDOWS: '6.10.3'
   # Qt for the .deb and the .rpm builds: the floor the QML UI needs. Qt 6.5 is
   # the minimum because the UI layer uses QQmlApplicationEngine::loadFromModule
   # (added in 6.5) and the native folder dialogs (added in 6.3). Distributions
@@ -222,6 +229,10 @@ jobs:
           echo "the AppImage started and stayed alive"
 
       - uses: actions/upload-artifact@v7
+        # upload even when a check above failed: the artifacts are meant to be
+        # tried on real machines, and a failing smoke test is no reason to hide
+        # the package. The release job still requires every job to succeed.
+        if: always()
         with:
           name: linux-appimage
           path: QuteTavern-*-x86_64.AppImage
@@ -244,7 +255,7 @@ jobs:
 
       - uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ env.QT_VERSION }}
+          version: ${{ env.QT_VERSION_WINDOWS }}
           arch: win64_msvc2022_64
           modules: 'qtwebengine qtwebchannel qtpositioning qtserialport'
           cache: true
@@ -335,6 +346,8 @@ jobs:
           Write-Host "install + start + uninstall round trip succeeded"
 
       - uses: actions/upload-artifact@v7
+        # see the AppImage job: artifacts are uploaded even if a check failed
+        if: always()
         with:
           name: windows-installer
           path: QuteTavern-*-Setup.exe
@@ -474,9 +487,24 @@ jobs:
       - name: Install and run the packaged app
         run: |
           set -e
-          sudo installer -pkg "$PKG" -target /
-          APP="/Applications/QuteTavern.app"
-          test -d "$APP" || { echo "::error::the package did not install the app"; exit 1; }
+          LOG=$(sudo installer -pkg "$PKG" -target / -verbose 2>&1 | tail -8)
+          printf '%s\n' "$LOG"
+          # Ask the installer where the bundle went instead of assuming it: the
+          # Installer framework replaces an existing copy of a bundle with the
+          # same identifier, and pkgbuild writes the payload relative to the
+          # --install-location given above (/Applications), so the first path
+          # component of the payload is the bundle's directory name.
+          FILES=$(pkgutil --files io.github.lckhot.qutetavern 2>/dev/null || true)
+          BUNDLE=$(printf '%s\n' "$FILES" | sed -n 's|^\([^/]*\.app\)\(/.*\)\?$|\1|p' | head -1)
+          APP="/Applications/$BUNDLE"
+          if [ -z "$BUNDLE" ] || [ ! -d "$APP" ]; then
+            echo "::error::the package did not install the app"
+            echo "::warning::installer said: $(printf '%s' "$LOG" | tail -4 | tr '\n' '|')"
+            echo "::warning::/Applications holds: $(ls -1 /Applications | tr '\n' ' ')"
+            echo "::warning::package payload: $(printf '%s' "$FILES" | head -4 | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "installed at $APP"
           QT_QPA_PLATFORM=offscreen "$APP/Contents/MacOS/qutetavern" >smoke2.log 2>&1 &
           PID=$!
           sleep 10
@@ -489,6 +517,8 @@ jobs:
           echo "the installed app started and stayed alive"
 
       - uses: actions/upload-artifact@v7
+        # see the AppImage job: artifacts are uploaded even if a check failed
+        if: always()
         with:
           name: macos-pkg
           path: QuteTavern-*-universal.pkg
@@ -507,7 +537,7 @@ jobs:
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "version: $VERSION"
 
-      - name: Install Qt (official binaries, 6.2.4)
+      - name: Install Qt (official binaries, ${{ env.QT_VERSION_FLOOR }})
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION_FLOOR }}
@@ -612,10 +642,19 @@ jobs:
           rpm -qpi "$RPM"
           echo "--- requirements declared by the package ---"
           rpm -qpR "$RPM" | sort -u
-          rpm -qpR "$RPM" | grep -q "libQt6Quick.so.6" \
-            || { echo "::error::the Qt Quick dependency is not declared"; exit 1; }
+          rpm -qpR "$RPM" | grep -q "libQt6Qml.so.6" \
+            || { echo "::error::the Qt QML dependency is not declared"; exit 1; }
           rpm -qpR "$RPM" | grep -q "libQt6WebEngineQuick.so.6" \
             || { echo "::error::the WebEngine Quick dependency is not declared"; exit 1; }
+          # libQt6Quick.so.6 is deliberately not asserted: the QML engine loads
+          # Qt Quick at runtime, nothing references its symbols, so the linker
+          # drops the dependency. libQt6Qml.so.6 is what carries it in: on
+          # Fedora that SONAME comes from qt6-qtdeclarative, the package that
+          # also ships the QtQuick QML modules.
+          if rpm -qpR "$RPM" | grep -q "libQt6Widgets.so.6"; then
+            echo "::error::the package still depends on Qt Widgets"
+            exit 1
+          fi
 
       - name: Install and start the .rpm in a clean Fedora container
         run: |
@@ -648,6 +687,8 @@ jobs:
           '
 
       - uses: actions/upload-artifact@v7
+        # see the AppImage job: artifacts are uploaded even if a check failed
+        if: always()
         with:
           name: linux-packages
           path: |
