@@ -15,6 +15,10 @@ Dialog {
     width: Theme.dialogWidth
     height: Math.min(implicitHeight, parent ? parent.height - 2 * Theme.dialogMargin : implicitHeight)
     anchors.centerIn: parent
+
+    // Background from the application palette's "window" role instead of the QML
+    // style theme (see AppController::windowColor).
+    background: Rectangle { color: App.windowColor }
     visible: App.messageVisible
 
     contentItem: Label {

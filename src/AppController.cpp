@@ -11,6 +11,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QGuiApplication>
+#include <QPalette>
 #include <QThread>
 #include <QTimer>
 #include <QVariantMap>
@@ -73,6 +74,15 @@ bool AppController::stWindowVisible() const
 QString AppController::stUrl() const
 {
     return m_backend->url();
+}
+
+QColor AppController::windowColor() const
+{
+    // QPalette::Window is the role a QDialog background uses, so this is the
+    // colour the widget build showed. Reading it from the application palette
+    // (rather than from a Controls item's palette) keeps the result identical
+    // under every Qt Quick style.
+    return QGuiApplication::palette().color(QPalette::Window);
 }
 
 bool AppController::stAutoMaximize() const
