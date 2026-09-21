@@ -62,32 +62,23 @@ When the backend crashes the ST window closes automatically, and the error plus
 the log are presented in the management window - **backend running ⟺ ST window
 exists** (unless the user closed it), no hidden state.
 
-The page's Fullscreen API is enabled and driven by the ST window
-(`qml/StWindow.qml`):
+The page's Fullscreen API is enabled and **answered without touching the window**:
 
-- every request is accepted, so the requesting element fills the view — that is
-  all Qt WebEngine does by itself ("it is up to the application to make the view
-  fullscreen")
-- entering fullscreen makes the window fullscreen; leaving restores the
-  visibility **and the size** it had before, so the window cannot come back as
-  the platform's stale default size
-- the size that must come back is written to Settings at the moment fullscreen is
-  entered — the last moment where the current size is known to be a normal one;
-  the same size is seeded into the window before it is first maximized, so a
-  window that never had a normal size cannot be restored to 640x480
-- the compositor can pull the window out of fullscreen behind the page's back;
-  the page is then told through the official `fullScreenCancelled()` API instead
-  of guessing states, and focus plus the input method are re-armed afterwards
-  (Wayland re-arms the text input object on focus changes only)
-- Escape leaves fullscreen only while the page actually holds a fullscreen
-  element (window-scoped shortcut), so it keeps reaching inputs and the input
-  method the rest of the time
-- a fullscreen geometry is never written back to Settings, and "Open ST window"
-  raises a fullscreen window instead of forcing it back to normal
-
-QML has no separately accessible page object, so a page cannot be moved between
-two views: the widget example's "dedicated fullscreen window + `setPage()`" route
-is not available here. Everything above therefore happens on the one window.
+- every request is accepted; Qt WebEngine then makes the requesting element fill
+  the view — which *is* the ST window's content area. Nothing else is required.
+- the launcher deliberately never switches the window into a platform fullscreen
+  state: on Wayland the window system decides a window's size and position, and
+  the fullscreen/maximized/normal flip is what left the window restored to a
+  stale default size and the input method without a focus target.
+- Escape exits the page fullscreen, armed while the page holds a fullscreen
+  element (`WebEngineView.isFullScreen` is the single source of truth); focus and
+  the input method are re-armed afterwards.
+- a borderless *real* fullscreen stays available from the window system
+  (compositor shortcut). The launcher never fights it and the page's fullscreen
+  element is unaffected by it.
+- only maximized geometries are kept out of Settings, and the window is seeded
+  with its remembered normal size before it is first maximized, so un-maximizing
+  never lands on the platform's default 640x480.
 
 ## 3. Module design
 

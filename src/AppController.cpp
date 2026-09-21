@@ -205,12 +205,13 @@ void AppController::onStWindowClosed()
     emit changed();
 }
 
-void AppController::saveStWindowGeometry(int x, int y, int w, int h, bool maximized,
-                                         bool fullScreen)
+void AppController::saveStWindowGeometry(int x, int y, int w, int h, bool maximized)
 {
-    // A maximized/fullscreen geometry must not be written back, or the next
-    // launch would open fullscreen-sized but without fullscreen.
-    if (!m_settings->rememberWindowState || maximized || fullScreen)
+    // A maximized geometry is not a useful "normal" size and must not be written
+    // back, or the next launch would open maximized-sized but un-maximized.
+    // (The window is never put into a platform fullscreen state, so there is no
+    // fullscreen geometry to guard against.)
+    if (!m_settings->rememberWindowState || maximized)
         return;
     if (w <= 0 || h <= 0)
         return;

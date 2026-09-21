@@ -5,23 +5,25 @@ import QtWebEngine
 
 // The SillyTavern front end window (Qt WebEngine / Chromium).
 //
-// Fullscreen contract (DESIGN section 2):
-//  - the page's Fullscreen API is enabled; every request is accepted, so the
-//    requesting element fills the view (that is all Qt WebEngine does by itself)
-//  - entering fullscreen makes *this* window fullscreen, leaving restores the
-//    visibility and the size it had before - like a browser
-//  - Escape leaves fullscreen, but only while the page actually holds a
-//    fullscreen element (otherwise Escape keeps reaching the page/input method)
-//  - when the window system pulls the window out of fullscreen (compositor
-//    shortcut), the page is told through the official fullScreenCancelled() API
-//  - a fullscreen geometry is never written back to Settings
+// Fullscreen contract (DESIGN section 2): "fullscreen" means the page fills this
+// window's content area. The window itself is never resized and never switched
+// into a platform fullscreen state.
 //
-// Why the size handling is explicit: on Wayland the client cannot place its own
-// window and the "normal size" a window is restored to is partly remembered by
-// the platform. A window that was never shown at a normal size (start maximized
-// -> fullscreen) would be restored to its default (640x480) instead of the size
-// the user had. Seeding the size before maximizing and writing the pre-fullscreen
-// size at the moment fullscreen is entered (below) keeps a known-good value.
+// Why: on Wayland the window system - not the application - decides a window's
+// size and position. The fullscreen/maximized/normal flip was what left the
+// window restored to a stale default size and the input method without a focus
+// target (the Wayland text input object re-arms on focus changes only). None of
+// that is needed: Qt WebEngine makes the requesting element fill the view as soon
+// as the request is accepted, and the view *is* this window's content area.
+//
+// - every page request is accepted; nothing else happens to the window
+// - Escape exits the page fullscreen - armed exactly while the page holds a
+//   fullscreen element (WebEngineView.isFullScreen is the single source of truth)
+// - a borderless real fullscreen stays available from the window system
+//   (compositor shortcut); the page does not care and nothing here fights it
+// - only maximized geometries are kept out of Settings, and the window is seeded
+//   with its remembered normal size before it is first maximized, so
+//   un-maximizing never lands on the platform's default 640x480
 Window {
     id: stWindow
 
@@ -30,20 +32,14 @@ Window {
     // Set by Main.qml: the window is destroyed when it closes
     signal closed()
 
-    // The page currently holds a fullscreen element
-    property bool pageFullScreen: false
-    // Visibility the window returns to when the page leaves fullscreen
-    property int baseVisibility: Window.Windowed
-
     Component.onCompleted: {
-        // Seed the seeded normal size *before* any maximize/fullscreen: this is
-        // what keeps a "you decide" restore from landing on a default size.
+        // Seed the remembered normal size before any maximize: a window that was
+        // never shown at a normal size is otherwise restored to a default one.
         const g = App.stNormalGeometry
         if (g.w > 0 && g.h > 0) {
             width = g.w
             height = g.h
         }
-        baseVisibility = App.stAutoMaximize ? Window.Maximized : Window.Windowed
         if (App.stAutoMaximize)
             visibility = Window.Maximized
         view.url = App.stUrl
@@ -59,91 +55,41 @@ Window {
         settings.fullScreenSupportEnabled: true
 
         onFullScreenRequested: function (request) {
-            // Accept both directions: the page cannot reject its own exit, and
-            // accepting keeps the page's fullscreenElement in sync.
+            // Accepting is all that is needed: the element fills the view, which
+            // is this window's content area. The window stays exactly as it is.
             request.accept()
-            if (request.toggleOn)
-                stWindow.enterPageFullScreen()
-            else
-                stWindow.leavePageFullScreen()
+            if (!request.toggleOn) {
+                // Leaving the page's fullscreen: keep the keyboard and the input
+                // method on the page.
+                view.forceActiveFocus()
+                App.resyncInputMethod()
+            }
         }
     }
 
-    // A browser consumes Escape while a page is fullscreen. The shortcut is
-    // scoped to this window and armed only while the page holds a fullscreen
-    // element, so it cannot swallow Escape from inputs or the input method.
+    // A browser consumes Escape while a page is fullscreen. The shortcut only
+    // exists while the page actually holds a fullscreen element, so Escape keeps
+    // reaching inputs and the input method the rest of the time.
     Shortcut {
         sequence: "Escape"
-        enabled: stWindow.pageFullScreen
+        enabled: view.isFullScreen
         onActivated: view.triggerWebAction(WebEngineView.ExitFullScreen)
     }
 
-    // ---------- the only place window state is changed ----------
-    function enterPageFullScreen() {
-        if (pageFullScreen)
-            return
-        pageFullScreen = true
-        if (visibility !== Window.FullScreen && visibility !== Window.Minimized) {
-            baseVisibility = visibility === Window.Maximized ? Window.Maximized : Window.Windowed
-            // Remember the size to come back to - here, at the last moment where
-            // it is known to be a normal (not fullscreen) size.
-            if (baseVisibility === Window.Windowed)
-                App.saveStWindowGeometry(x, y, width, height, false, false)
-        }
-        visibility = Window.FullScreen
-    }
-
-    function leavePageFullScreen() {
-        if (!pageFullScreen)
-            return
-        pageFullScreen = false
-        visibility = baseVisibility
-        if (baseVisibility === Window.Windowed)
-            restoreNormalSize()
-        // Hand focus and the input method back to the page: the Wayland text
-        // input object is re-armed on focus changes, not on window state changes.
-        view.forceActiveFocus()
-        App.resyncInputMethod()
-    }
-
-    function restoreNormalSize() {
-        const g = App.stNormalGeometry
-        if (g.w > 0 && g.h > 0) {
-            width = g.w
-            height = g.h
-        }
-    }
-
-    // The window manager can pull the window out of fullscreen behind the page's
-    // back (e.g. a compositor shortcut). Chromium would keep believing it is in
-    // fullscreen, so tell it - no state guessing on our side.
-    onVisibilityChanged: function (vis) {
-        if (pageFullScreen && vis !== Window.FullScreen && vis !== Window.Minimized) {
-            pageFullScreen = false
-            baseVisibility = vis === Window.Maximized ? Window.Maximized : Window.Windowed
-            view.fullScreenCancelled()
-            view.forceActiveFocus()
-            App.resyncInputMethod()
-        } else if (!pageFullScreen && (vis === Window.Windowed || vis === Window.Maximized)) {
-            baseVisibility = vis
-        }
-    }
-
-    // "Open ST window" while it already exists: bring it to the front without
-    // forcing a fullscreen window back to normal.
+    // "Open ST window" while it already exists: bring it back to the front
+    // without changing anything else about it.
     Connections {
         target: App
         function onRaiseStWindow() {
             if (stWindow.visibility === Window.Minimized)
-                stWindow.visibility = stWindow.pageFullScreen ? Window.FullScreen : stWindow.baseVisibility
+                stWindow.visibility = App.stAutoMaximize ? Window.Maximized : Window.Windowed
             stWindow.raise()
             stWindow.requestActivate()
         }
     }
 
     function saveGeometry() {
-        App.saveStWindowGeometry(x, y, width, height, visibility === Window.Maximized,
-                                 pageFullScreen)
+        App.saveStWindowGeometry(x, y, width, height, visibility === Window.Maximized)
     }
 
     onClosing: function (close) {

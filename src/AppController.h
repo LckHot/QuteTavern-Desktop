@@ -136,8 +136,7 @@ public:
     Q_INVOKABLE void installDepsThenStart();
     Q_INVOKABLE void openStWindow();
     Q_INVOKABLE void onStWindowClosed();
-    Q_INVOKABLE void saveStWindowGeometry(int x, int y, int w, int h, bool maximized,
-                                          bool fullScreen);
+    Q_INVOKABLE void saveStWindowGeometry(int x, int y, int w, int h, bool maximized);
     Q_INVOKABLE void resyncInputMethod();
     Q_INVOKABLE void openDataDir();
 
