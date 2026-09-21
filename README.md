@@ -108,14 +108,11 @@ manager.
 The macOS package is one universal `.pkg`. A single build passes both `arm64`
 and `x86_64` to the compiler, so splitting it into two downloads would buy
 nothing but a second job, a second artifact and a "which Mac do I have?" choice
-for the user. CI checks that every Mach-O file in the bundle - the application,
-every Qt framework, the WebEngine helper process and the QML plugin libraries -
-really carries both slices, and the startup tests launch the `arm64` slice
-explicitly; on the arm64 runners Rosetta 2 is not installed, so a process that
-survives those tests ran natively rather than translated. The only cost of the
-universal build is size (~250 MB instead of ~130 MB); if that ever outweighs
-running on Intel Macs, dropping `x86_64` is a one-line change to the build
-flags.
+for the user. CI asserts that the application carries both slices, which is what
+the "Intel and Apple silicon" claim in this table rests on; the arm64 slice is
+compiled natively on the arm64 runner. The only cost of the universal build is
+size (~250 MB instead of ~130 MB); if that ever outweighs running on Intel Macs,
+dropping `x86_64` is a one-line change to the build flags.
 
 ## Distribution support
 
