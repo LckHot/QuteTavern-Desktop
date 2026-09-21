@@ -1,28 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#include "MainWindow.h"
+#include "AppController.h"
 
-#include "EnvCheck.h"
-
-#include <QApplication>
+#include <QCoreApplication>
+#include <QGuiApplication>
 #include <QIcon>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QWindow>
+
+#include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
 int main(int argc, char *argv[])
 {
     // Qt WebEngine needs shared OpenGL contexts when several windows use it
-    // (must be set before the QApplication is constructed)
-    QApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+    // (must be set before the QGuiApplication is constructed)
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+    // Qt Quick entry point of Qt WebEngine (official order: before the app object)
+    QtWebEngineQuick::initialize();
 
-    QApplication app(argc, argv);
+    QGuiApplication app(argc, argv);
     // No organization name on purpose: configuration and runtime components live
     // right in the per-application directories (~/.config/QuteTavern,
     // ~/.local/share/QuteTavern). The SillyTavern data directory is a separate,
     // fixed location and unaffected by this.
-    QApplication::setApplicationName(QStringLiteral("QuteTavern"));
-    QApplication::setApplicationVersion(QStringLiteral("1.1.0"));
-    QApplication::setDesktopFileName(QStringLiteral("qutetavern.desktop"));
-    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/icon.png")));
+    QGuiApplication::setApplicationName(QStringLiteral("QuteTavern"));
+    QGuiApplication::setApplicationVersion(QStringLiteral("1.1.0"));
+    QGuiApplication::setDesktopFileName(QStringLiteral("qutetavern.desktop"));
+    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/icon.png")));
 
     // Single instance: an already running instance is asked to raise itself.
     // A first instance that is still starting up may not answer within the
@@ -49,24 +55,32 @@ int main(int argc, char *argv[])
                      qPrintable(key));
     }
 
-    MainWindow w;
+    // The whole UI lives in QML (qml/Main.qml); this object is the only bridge to
+    // the C++ logic layer (Backend / Installer / Updater / Util / Settings /
+    // EnvCheck). The environment check (node/git) is owned by it as well: the
+    // QML dialog appears on top of the management window instead of blocking
+    // before it is shown.
+    AppController controller;
 
-    // Environment check: when node/git are missing the user can either quit or
-    // download portable copies into the application data directory. Quitting
-    // terminates the application.
-    if (!EnvCheck::ensureEnvironment(nullptr))
-        return 0;
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("App"), &controller);
+    engine.loadFromModule("QuteTavern", "Main");
+    if (engine.rootObjects().isEmpty())
+        return 1;
 
-    w.show();
-
+    // Raising applies to the management window; the ST window is raised through
+    // AppController::raiseStWindow() instead.
+    auto *window = qobject_cast<QWindow *>(engine.rootObjects().constFirst());
     QObject::connect(&server, &QLocalServer::newConnection, &server, [&] {
         while (server.hasPendingConnections()) {
             QLocalSocket *conn = server.nextPendingConnection();
             conn->deleteLater();
         }
-        w.show();
-        w.raise();
-        w.activateWindow();
+        if (!window)
+            return;
+        window->show();
+        window->raise();
+        window->requestActivate();
     });
 
     return app.exec();

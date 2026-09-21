@@ -13,13 +13,14 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets WebEngineWidgets Network)
+# The UI layer is Qt Quick (QML); the logic layer (Backend/Installer/Updater/
+# Util/Settings/EnvCheck) is plain C++ and never touches QtWidgets.
+find_package(Qt6 REQUIRED COMPONENTS Gui Quick QuickControls2 WebEngineQuick Network)
 
 qt_add_executable(qutetavern
     src/main.cpp
-    src/MainWindow.cpp
+    src/AppController.cpp
     src/Backend.cpp
-    src/StWindow.cpp
     src/Settings.cpp
     src/Util.cpp
     src/Updater.cpp
@@ -28,9 +29,34 @@ qt_add_executable(qutetavern
     resources/icons.qrc
 )
 
+# QML UI module: every window/dialog lives in qml/*.qml. qt_add_qml_module keeps
+# the files in a resource-backed module (loadFromModule) and lets the deployment
+# tools (windeployqt/macdeployqt) scan the imports. Theme.qml is a singleton and
+# must be flagged *before* the module is declared.
+set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
+qt_add_qml_module(qutetavern
+    URI QuteTavern
+    VERSION 1.0
+    QML_FILES
+        qml/Main.qml
+        qml/WizardPage.qml
+        qml/MainPage.qml
+        qml/StWindow.qml
+        qml/PreferencesDialog.qml
+        qml/UpdateDialog.qml
+        qml/InstallDialog.qml
+        qml/EnvDialog.qml
+        qml/ForeignDialog.qml
+        qml/MessageDialog.qml
+        qml/Theme.qml
+)
+
 target_link_libraries(qutetavern PRIVATE
-    Qt6::Widgets
-    Qt6::WebEngineWidgets
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::QuickControls2
+    Qt6::WebEngineQuick
     Qt6::Network
 )
 
@@ -61,7 +87,7 @@ endif()
 # source files as the app so both stay honest about the same code.
 include(CTest)
 if(BUILD_TESTING)
-    find_package(Qt6 REQUIRED COMPONENTS Gui Test)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
     qt_add_executable(qutetavern-tests
         tests/tst_qutetavern.cpp
         src/Util.cpp
