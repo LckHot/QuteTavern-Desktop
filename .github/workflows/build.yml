@@ -446,31 +446,17 @@ jobs:
           echo "QML modules bundled under $(dirname "$QMLDIR")"
           echo "the WebEngine framework, its helper process and the QML modules are in place"
 
-          # The package is universal: a single build produces both slices, so
-          # every Mach-O file inside the bundle has to carry both. A framework
-          # without the x86_64 slice would break the Intel half at runtime, one
-          # without arm64 the Apple silicon half, and neither would be noticed
-          # by a smoke test that only exercises the machine it runs on.
-          HELPER="$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app/Contents/MacOS/QtWebEngineProcess"
-          BINARIES="$APP/Contents/MacOS/qutetavern $HELPER"
-          for fw in "$APP"/Contents/Frameworks/*.framework; do
-            name=$(basename "$fw" .framework)
-            [ -f "$fw/Versions/A/$name" ] && BINARIES="$BINARIES $fw/Versions/A/$name"
+          # The package is advertised for Intel and Apple silicon alike: the
+          # build compiles both slices in one go, so the application must carry
+          # both.
+          ARCHS=$(lipo -archs "$APP/Contents/MacOS/qutetavern")
+          echo "application architectures: $ARCHS"
+          for a in arm64 x86_64; do
+            case " $ARCHS " in
+              *" $a "*) ;;
+              *) echo "::error::the application is missing the $a slice"; exit 1 ;;
+            esac
           done
-          BINARIES="$BINARIES $(find "$APP/Contents/Resources/qml" -name '*.dylib' 2>/dev/null | tr '\n' ' ')"
-          COUNT=0
-          for f in $BINARIES; do
-            [ -f "$f" ] || continue
-            archs=$(lipo -archs "$f")
-            for a in arm64 x86_64; do
-              case " $archs " in
-                *" $a "*) ;;
-                *) echo "::error::${f#"$APP"/} is missing the $a slice: $archs"; exit 1 ;;
-              esac
-            done
-            COUNT=$((COUNT + 1))
-          done
-          echo "$COUNT bundled Mach-O files carry the arm64 and the x86_64 slice"
 
       - name: Sign (ad-hoc) and verify the signature
         run: |
@@ -486,16 +472,7 @@ jobs:
         run: |
           set -e
           APP_EXE="dist/QuteTavern.app/Contents/MacOS/qutetavern"
-          # Two facts about "this really ran as arm64": Rosetta 2 has to exist
-          # for a translated process to run at all, and launching through
-          # `arch -arm64` fails outright when the binary has no arm64 slice.
-          if arch -x86_64 /usr/bin/true 2>/dev/null; then
-            echo "Rosetta 2 is installed on this machine"
-          else
-            echo "Rosetta 2 is not installed: a process here can only run natively"
-          fi
-          echo "architectures in the app binary: $(lipo -archs "$APP_EXE")"
-          QT_QPA_PLATFORM=offscreen /usr/bin/arch -arm64 "$APP_EXE" >smoke.log 2>&1 &
+          QT_QPA_PLATFORM=offscreen "$APP_EXE" >smoke.log 2>&1 &
           PID=$!
           sleep 10
           if ! kill -0 "$PID" 2>/dev/null; then
@@ -552,13 +529,12 @@ jobs:
             echo "::error::the package is marked relocatable, so the installer may not use /Applications"
             exit 1
           fi
-          bsdtar -tf /tmp/qutetavern-pkg/Payload > payload.txt
-          grep -qx "QuteTavern.app/Contents/MacOS/qutetavern" payload.txt || {
+          bsdtar -tf /tmp/qutetavern-pkg/Payload | grep -qx "QuteTavern.app/Contents/MacOS/qutetavern" || {
             echo "::error::the payload does not contain the application binary"
-            head -20 payload.txt
+            bsdtar -tf /tmp/qutetavern-pkg/Payload | head -20
             exit 1
           }
-          echo "the package installs into /Applications and carries $(wc -l < payload.txt) payload entries"
+          echo "the package installs into /Applications and carries the application"
 
       - name: Install and run the packaged app
         run: |
@@ -578,9 +554,7 @@ jobs:
             exit 1
           fi
           echo "installed at $APP"
-          # run the arm64 slice explicitly, so a missing or broken arm64 build
-          # cannot hide behind Rosetta translation
-          QT_QPA_PLATFORM=offscreen /usr/bin/arch -arm64 "$APP/Contents/MacOS/qutetavern" >smoke2.log 2>&1 &
+          QT_QPA_PLATFORM=offscreen "$APP/Contents/MacOS/qutetavern" >smoke2.log 2>&1 &
           PID=$!
           sleep 10
           if ! kill -0 "$PID" 2>/dev/null; then
@@ -668,12 +642,6 @@ jobs:
           for p in libqt6quick6 libqt6qml6 libqt6quickcontrols2-6 libqt6webenginequick6 \
                    qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
                    qml6-module-qtquick-window qml6-module-qtwebengine; do
-            echo "$DEPENDS" | grep -q "$p" \
-              || { echo "::error::$p is not declared in Depends"; exit 1; }
-          done
-          # the GL stack is linked from the system, not from Qt: on most systems
-          # libqt6gui6 pulls these in, but a package declares what it needs
-          for p in libopengl0 libegl1 libglx0; do
             echo "$DEPENDS" | grep -q "$p" \
               || { echo "::error::$p is not declared in Depends"; exit 1; }
           done

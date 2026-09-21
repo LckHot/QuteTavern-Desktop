@@ -69,12 +69,10 @@ if command -v dpkg-deb >/dev/null 2>&1; then
     #    layout types come from QtQuick.Layouts, and the web view is
     #    QtWebEngine's QML module. qt6-qpa-plugins provides the platform plugins
     #    and libqt6webenginecore6-bin the WebEngine helper process + resources.
-    DEPENDS="libc6 (>= 2.35), libgcc-s1, libstdc++6, libgl1, libopengl0, libegl1, libglx0, libx11-6, libx11-xcb1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libnss3, libnspr4, libasound2, libdbus-1-3, libgbm1, libqt6core6 (>= 6.5), libqt6gui6 (>= 6.5), libqt6network6 (>= 6.5), libqt6qml6 (>= 6.5), libqt6quick6 (>= 6.5), libqt6quickcontrols2-6 (>= 6.5), libqt6quicktemplates2-6 (>= 6.5), libqt6webchannel6 (>= 6.5), libqt6positioning6 (>= 6.5), libqt6webenginecore6 (>= 6.5), libqt6webenginequick6 (>= 6.5), libqt6webenginecore6-bin (>= 6.5), qml6-module-qtqml, qml6-module-qtquick, qml6-module-qtquick-window, qml6-module-qtquick-templates, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtwebengine, qt6-qpa-plugins"
-    # libopengl0/libegl1/libglx0 are listed because the binary really links
-    # them (verified with `ldd`): they would arrive through libqt6gui6 on most
-    # systems, but a dependency that a package relies on is declared, not
-    # inherited. dpkg-shlibdeps cannot do this job here - the binary links the
-    # official Qt binaries, whose libraries belong to no Debian package.
+    DEPENDS="libc6 (>= 2.35), libgcc-s1, libstdc++6, libgl1, libx11-6, libx11-xcb1, libxcb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libnss3, libnspr4, libasound2, libdbus-1-3, libgbm1, libqt6core6 (>= 6.5), libqt6gui6 (>= 6.5), libqt6network6 (>= 6.5), libqt6qml6 (>= 6.5), libqt6quick6 (>= 6.5), libqt6quickcontrols2-6 (>= 6.5), libqt6quicktemplates2-6 (>= 6.5), libqt6webchannel6 (>= 6.5), libqt6positioning6 (>= 6.5), libqt6webenginecore6 (>= 6.5), libqt6webenginequick6 (>= 6.5), libqt6webenginecore6-bin (>= 6.5), qml6-module-qtqml, qml6-module-qtquick, qml6-module-qtquick-window, qml6-module-qtquick-templates, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtwebengine, qt6-qpa-plugins"
+    # The GL stack (libglx0, libopengl0, libegl1) is deliberately not repeated
+    # here: libqt6gui6 depends on all three, and this package depends on
+    # libqt6gui6 (checked against Debian's own metadata for trixie).
 
     mkdir -p "$ROOT/DEBIAN"
     cat > "$ROOT/DEBIAN/control" <<EOF
