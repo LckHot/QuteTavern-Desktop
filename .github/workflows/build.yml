@@ -445,7 +445,32 @@ jobs:
           done
           echo "QML modules bundled under $(dirname "$QMLDIR")"
           echo "the WebEngine framework, its helper process and the QML modules are in place"
-          lipo -info "$APP/Contents/MacOS/qutetavern"
+
+          # The package is universal: a single build produces both slices, so
+          # every Mach-O file inside the bundle has to carry both. A framework
+          # without the x86_64 slice would break the Intel half at runtime, one
+          # without arm64 the Apple silicon half, and neither would be noticed
+          # by a smoke test that only exercises the machine it runs on.
+          HELPER="$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app/Contents/MacOS/QtWebEngineProcess"
+          BINARIES="$APP/Contents/MacOS/qutetavern $HELPER"
+          for fw in "$APP"/Contents/Frameworks/*.framework; do
+            name=$(basename "$fw" .framework)
+            [ -f "$fw/Versions/A/$name" ] && BINARIES="$BINARIES $fw/Versions/A/$name"
+          done
+          BINARIES="$BINARIES $(find "$APP/Contents/Resources/qml" -name '*.dylib' 2>/dev/null | tr '\n' ' ')"
+          COUNT=0
+          for f in $BINARIES; do
+            [ -f "$f" ] || continue
+            archs=$(lipo -archs "$f")
+            for a in arm64 x86_64; do
+              case " $archs " in
+                *" $a "*) ;;
+                *) echo "::error::${f#"$APP"/} is missing the $a slice: $archs"; exit 1 ;;
+              esac
+            done
+            COUNT=$((COUNT + 1))
+          done
+          echo "$COUNT bundled Mach-O files carry the arm64 and the x86_64 slice"
 
       - name: Sign (ad-hoc) and verify the signature
         run: |
@@ -461,7 +486,16 @@ jobs:
         run: |
           set -e
           APP_EXE="dist/QuteTavern.app/Contents/MacOS/qutetavern"
-          QT_QPA_PLATFORM=offscreen "$APP_EXE" >smoke.log 2>&1 &
+          # Two facts about "this really ran as arm64": Rosetta 2 has to exist
+          # for a translated process to run at all, and launching through
+          # `arch -arm64` fails outright when the binary has no arm64 slice.
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "Rosetta 2 is installed on this machine"
+          else
+            echo "Rosetta 2 is not installed: a process here can only run natively"
+          fi
+          echo "architectures in the app binary: $(lipo -archs "$APP_EXE")"
+          QT_QPA_PLATFORM=offscreen /usr/bin/arch -arm64 "$APP_EXE" >smoke.log 2>&1 &
           PID=$!
           sleep 10
           if ! kill -0 "$PID" 2>/dev/null; then
@@ -518,7 +552,9 @@ jobs:
             exit 1
           fi
           echo "installed at $APP"
-          QT_QPA_PLATFORM=offscreen "$APP/Contents/MacOS/qutetavern" >smoke2.log 2>&1 &
+          # run the arm64 slice explicitly, so a missing or broken arm64 build
+          # cannot hide behind Rosetta translation
+          QT_QPA_PLATFORM=offscreen /usr/bin/arch -arm64 "$APP/Contents/MacOS/qutetavern" >smoke2.log 2>&1 &
           PID=$!
           sleep 10
           if ! kill -0 "$PID" 2>/dev/null; then
