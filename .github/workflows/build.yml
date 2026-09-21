@@ -487,21 +487,26 @@ jobs:
       - name: Install and run the packaged app
         run: |
           set -e
-          LOG=$(sudo installer -pkg "$PKG" -target / -verbose 2>&1 | tail -8)
+          # Install into a fresh, empty volume rather than the runner's own
+          # /Applications. The Installer framework *relocates* a bundle
+          # component: when it finds a copy of the same application (matching
+          # CFBundleIdentifier) on the target volume, that copy is updated
+          # instead - and this workspace still holds dist/QuteTavern.app and
+          # build/qutetavern.app. Installer still reports success in that case,
+          # so the application simply never appears in /Applications. A pristine
+          # volume holds no such copy.
+          hdiutil create -size 2g -fs HFS+ -volname QuteTavernTest \
+                         -type SPARSE /tmp/qutetavern-test.dmg >/dev/null
+          MOUNT=$(hdiutil attach /tmp/qutetavern-test.dmg | grep -o '/Volumes/.*' | head -1)
+          echo "install target: $MOUNT"
+          LOG=$(sudo installer -pkg "$PKG" -target "$MOUNT" -verbose 2>&1 | tail -8)
           printf '%s\n' "$LOG"
-          # Ask the installer where the bundle went instead of assuming it: the
-          # Installer framework replaces an existing copy of a bundle with the
-          # same identifier, and pkgbuild writes the payload relative to the
-          # --install-location given above (/Applications), so the first path
-          # component of the payload is the bundle's directory name.
-          FILES=$(pkgutil --files io.github.lckhot.qutetavern 2>/dev/null || true)
-          BUNDLE=$(printf '%s\n' "$FILES" | sed -n 's|^\([^/]*\.app\)\(/.*\)\?$|\1|p' | head -1)
-          APP="/Applications/$BUNDLE"
-          if [ -z "$BUNDLE" ] || [ ! -d "$APP" ]; then
+          APP="$MOUNT/Applications/QuteTavern.app"
+          if [ ! -d "$APP" ]; then
             echo "::error::the package did not install the app"
             echo "::warning::installer said: $(printf '%s' "$LOG" | tail -4 | tr '\n' '|')"
-            echo "::warning::/Applications holds: $(ls -1 /Applications | tr '\n' ' ')"
-            echo "::warning::package payload: $(printf '%s' "$FILES" | head -4 | tr '\n' ' ')"
+            echo "::warning::volume holds: $(ls -1 "$MOUNT" | tr '\n' ' ')"
+            echo "::warning::package payload: $(pkgutil --volume "$MOUNT" --files io.github.lckhot.qutetavern 2>/dev/null | head -4 | tr '\n' ' ')"
             exit 1
           fi
           echo "installed at $APP"
@@ -515,6 +520,7 @@ jobs:
           fi
           kill "$PID" || true
           echo "the installed app started and stayed alive"
+          hdiutil detach "$MOUNT" >/dev/null 2>&1 || true
 
       - uses: actions/upload-artifact@v7
         # see the AppImage job: artifacts are uploaded even if a check failed
