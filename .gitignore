@@ -11,3 +11,7 @@ icon.icns
 
 # local tooling logs
 aqtinstall.log
+
+# Local runtime checkout and test data
+/SillyTavern/
+/a-card.png
